@@ -51,6 +51,9 @@ public:
     /** Pattern kac bar surer - cetvel ve dikey olcek buna gore etiketlenir. */
     void setPatternBars (int bars);
 
+    /** Arkaya cizilecek dalga formu: pattern boyunca esit dilimlerde tepe degerleri. */
+    void setWaveform (const std::vector<float>& peaks)  { waveform = peaks; }
+
     /** Cizim modu: sol tikla surukleme nokta eklemek yerine basamak boyar.
         Kapaliyken de Alt basili tutarak gecici olarak kullanilabilir. */
     void setDrawMode (bool shouldDraw)     { drawMode = shouldDraw; repaint(); }
@@ -93,6 +96,7 @@ private:
     void drawCurve (juce::Graphics&) const;
     void drawPoints (juce::Graphics&) const;
     void drawHandles (juce::Graphics&) const;
+    void drawWaveform (juce::Graphics&) const;
     void drawScale (juce::Graphics&) const;
     void drawRuler (juce::Graphics&) const;
 
@@ -112,6 +116,8 @@ private:
     int hoverPoint  = -1;
     int dragHandle  = -1;
     int hoverHandle = -1;
+
+    std::vector<float> waveform;
 
     bool drawMode      = false;
     bool painting      = false;

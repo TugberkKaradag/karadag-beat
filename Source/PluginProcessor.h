@@ -62,6 +62,10 @@ public:
     /** Calan kafanin pattern icindeki konumu, 0..1 - GUI cizimi icin. */
     double getPlayheadPhase() const noexcept { return displayPhase.load(); }
 
+    /** Gelen sesin pattern boyunca tepe degerleri - lane arkasindaki dalga formu. */
+    static constexpr int waveformBins = GrossEngine::kWaveBins;
+    float getWaveformPeak (int bin) const noexcept { return engine.getWavePeak (bin); }
+
     /** Pattern kac bar surer (1, 2 veya 4) - GUI izgarasi buna gore cizilir. */
     int getPatternBars() const noexcept;
 
@@ -77,7 +81,15 @@ public:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
 private:
-    void handleMidiTriggers (juce::MidiBuffer& midi);
+    /** Blok basinda: tetikleme kapandiysa ya da mod degistiyse durumu sifirlar.
+        false donerse bu blokta MIDI olaylari yok sayilir. */
+    bool beginMidiBlock();
+
+    /** Tek bir MIDI olayini isler - blok, olayin dustugu sample'da bolunur. */
+    void handleMidiMessage (const juce::MidiMessage& m);
+
+    /** Istenen pattern (MIDI ya da parametre) degistiyse ses zarflarina yukler. */
+    void applyDesiredPreset();
     void applySlotToAudioEnvelopes (int index);
 
     static juce::File getUserPatternFile();
@@ -117,6 +129,8 @@ private:
     std::atomic<float>* pMix         = nullptr;
     std::atomic<float>* pMidiTrigger = nullptr;
     std::atomic<float>* pMidiLatch   = nullptr;
+    std::atomic<float>* pTimeSmooth  = nullptr;
+    std::atomic<float>* pVolSmooth   = nullptr;
 
     // MIDI tetikleme
     juce::SortedSet<int> heldNotes;

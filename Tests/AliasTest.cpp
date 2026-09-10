@@ -90,6 +90,7 @@ namespace
         double thdnDb       = 0.0;   // ton disindaki her seyin orani
         double loudestOther = 0.0;   // en guclu yabanci bilesen (Hz)
         double otherDb      = 0.0;   // onun seviyesi
+        double toneDbfs     = 0.0;   // en guclu tonun mutlak seviyesi (tam olcekli sinus = 0)
     };
 
     Analysis analyse (std::vector<float> samples)
@@ -151,6 +152,10 @@ namespace
         result.loudestOther = otherPeakBin * binHz;
         result.otherDb      = 20.0 * std::log10 (juce::jmax (1.0e-20, otherPeakMag / juce::jmax (1.0e-20, (double) fftData[(size_t) peakBin])));
 
+        // JUCE'nin pencere tablosu normalize ediliyor (tutarli kazanc 1), bu yuzden
+        // tam olcekli bir sinusun tepe bini N/2 buyuklugunde
+        result.toneDbfs     = 20.0 * std::log10 (juce::jmax (1.0e-20, (double) fftData[(size_t) peakBin] / (kFftSize / 2.0)));
+
         return result;
     }
 }
@@ -163,7 +168,7 @@ int main()
                  kSampleRate, kSampleRate * 0.5, kFftSize);
 
     const double rates[] = { 1.0, 1.25, 1.5, 2.0 };
-    const double wanted[] = { 1000.0, 4000.0, 8000.0, 11000.0, 14000.0 };
+    const double wanted[] = { 1000.0, 4000.0, 8000.0, 11000.0, 14000.0, 17000.0, 20000.0 };
 
     // Test tonlarini FFT bin merkezine oturt - aksi halde pencere sizmasi
     // gercek bozulmanin ustunu ortuyor.  Hizlar rasyonel oldugu icin cikis
@@ -186,18 +191,20 @@ int main()
 
             const auto a = analyse (renderWindow (rate, freq));
 
-            std::printf ("   hiz %.2fx  ->  beklenen %6.0f Hz%s   olculen ton %6.0f Hz"
-                         "   THD+N %6.1f dB   en guclu yabanci %6.0f Hz (%.1f dB)\n",
-                         rate,
-                         expected,
-                         foldsOver ? "*" : " ",
-                         a.signalFreq,
-                         a.thdnDb,
-                         a.loudestOther,
-                         a.otherDb);
-
             if (foldsOver)
-                std::printf ("        * Nyquist ustu - katlanma beklenen yeri: %.0f Hz\n", foldedTo);
+            {
+                // Beklenen ton temsil edilemez; ne kadar az duyulursa o kadar iyi.
+                // Olculen en guclu bilesen katlanan alias'in kendisi.
+                std::printf ("   hiz %.2fx  ->  beklenen %6.0f Hz*  katlanan %6.0f Hz"
+                             "   seviyesi %6.1f dBFS   (0 = hic bastirilmamis)\n",
+                             rate, expected, foldedTo, a.toneDbfs);
+            }
+            else
+            {
+                std::printf ("   hiz %.2fx  ->  beklenen %6.0f Hz    olculen ton %6.0f Hz"
+                             "   seviye %5.1f dBFS   THD+N %6.1f dB\n",
+                             rate, expected, a.signalFreq, a.toneDbfs, a.thdnDb);
+            }
         }
 
         std::printf ("\n");

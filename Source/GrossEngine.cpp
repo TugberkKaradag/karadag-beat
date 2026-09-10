@@ -5,7 +5,9 @@
 namespace
 {
     constexpr int kTaps   = GrossEngine::kSincTaps;
+    constexpr int kBands  = GrossEngine::kSincBands;
     constexpr int kPhases = 1024;       // kesirli konum cozunurlugu (aralar dogrusal)
+    constexpr int kBandStride = (kPhases + 1) * kTaps;
 
     double besselI0 (double x)
     {
@@ -24,41 +26,53 @@ namespace
         return sum;
     }
 
-    /** Kaiser pencereli sinc cekirdekleri, her kesirli konum icin bir satir.
+    /** Kaiser pencereli sinc cekirdekleri: [bant][kesirli konum][nokta].
         Her satirin toplami 1'e normalize - DC kazanci konumdan bagimsiz kalsin.
-        Kesim frekansi tam Nyquist: tam sample konumunda cekirdek saf bir darbe
-        olur, boylece kesirli ve tam konumlar ayni frekans cevabini paylasir. */
+
+        Bant 0'da kesim tam Nyquist: tam sample konumunda cekirdek saf bir darbe
+        olur, boylece kesirli ve tam konumlar ayni frekans cevabini paylasir ve
+        normal hizda calma bit-bit seffaf kalir.
+
+        Bant b > 0 okuma hizi v = 1 + b/4 icin: kesim Nyquist / v.  Okuma kafasi v
+        kat hizli ilerlediginde giristeki f frekansi cikista v*f olur; Nyquist'i
+        asacak olanlar burada, girdi tarafinda suzuluyor. */
     const std::vector<float>& buildSincTable()
     {
         static const std::vector<float> table = []
         {
-            std::vector<float> t ((size_t) (kPhases + 1) * kTaps);
+            std::vector<float> t ((size_t) kBands * kBandStride);
 
             const double beta = 8.0;
             const double half = kTaps / 2.0;
             const double norm = besselI0 (beta);
             const double pi   = juce::MathConstants<double>::pi;
 
-            for (int p = 0; p <= kPhases; ++p)
+            for (int b = 0; b < kBands; ++b)
             {
-                const double frac = (double) p / kPhases;
-                double w[kTaps];
-                double sum = 0.0;
+                const double cutoff = 1.0 / (1.0 + 0.25 * b);
 
-                for (int k = 0; k < kTaps; ++k)
+                for (int p = 0; p <= kPhases; ++p)
                 {
-                    // k. nokta, okuma konumunun tabanina gore -(T/2-1) ... T/2 ofsetinde
-                    const double x = (double) (k - (kTaps / 2 - 1)) - frac;
-                    const double sinc = std::abs (x) < 1.0e-12 ? 1.0 : std::sin (pi * x) / (pi * x);
-                    const double r = x / half;
-                    const double win = std::abs (r) >= 1.0 ? 0.0
-                                                           : besselI0 (beta * std::sqrt (1.0 - r * r)) / norm;
-                    w[k] = sinc * win;
-                    sum += w[k];
-                }
+                    const double frac = (double) p / kPhases;
+                    double w[kTaps];
+                    double sum = 0.0;
 
-                for (int k = 0; k < kTaps; ++k)
-                    t[(size_t) (p * kTaps + k)] = (float) (w[k] / sum);
+                    for (int k = 0; k < kTaps; ++k)
+                    {
+                        // k. nokta, okuma konumunun tabanina gore -(T/2-1) ... T/2 ofsetinde
+                        const double x  = (double) (k - (kTaps / 2 - 1)) - frac;
+                        const double cx = cutoff * x;
+                        const double sinc = std::abs (cx) < 1.0e-12 ? 1.0 : std::sin (pi * cx) / (pi * cx);
+                        const double r = x / half;
+                        const double win = std::abs (r) >= 1.0 ? 0.0
+                                                               : besselI0 (beta * std::sqrt (1.0 - r * r)) / norm;
+                        w[k] = sinc * win;
+                        sum += w[k];
+                    }
+
+                    for (int k = 0; k < kTaps; ++k)
+                        t[(size_t) (b * kBandStride + p * kTaps + k)] = (float) (w[k] / sum);
+                }
             }
 
             return t;
@@ -94,17 +108,33 @@ void GrossEngine::reset()
     writePos     = 0;
     phase        = 0.0;
     prevReadPos  = 0.0;
+    readSpeed    = 1.0;
     havePrevRead = false;
     fadeCounter  = 0;
     fadeReadPos  = 0.0;
     currentGain  = 1.0;
     smoothedMix.setCurrentAndTargetValue (1.0);
+
+    for (auto& p : wavePeaks)
+        p.store (0.0f, std::memory_order_relaxed);
+
+    waveBin  = -1;
+    wavePeak = 0.0f;
 }
 
 void GrossEngine::setPatternLengthSamples (double lengthInSamples) noexcept
 {
     const double maxLen = (double) (ringLength - 8);
     patternLen = juce::jlimit (1.0, juce::jmax (1.0, maxLen), lengthInSamples);
+}
+
+void GrossEngine::setSmoothing (double timeMs, double volumeMs) noexcept
+{
+    fadeLength = juce::jmax (16, (int) (sr * juce::jlimit (0.5, 200.0, timeMs) * 0.001));
+    gainStep   = 1.0 / juce::jmax (1.0, sr * juce::jlimit (0.5, 200.0, volumeMs) * 0.001);
+
+    // Suren bir capraz gecis yeni uzunluktan uzun kalmasin
+    fadeCounter = juce::jmin (fadeCounter, fadeLength);
 }
 
 void GrossEngine::setPhase (double newPhase) noexcept
@@ -140,7 +170,7 @@ float GrossEngine::readHermite (int channel, double position) const noexcept
     return (float) ((((c3 * frac) + c2) * frac + c1) * frac + c0);
 }
 
-float GrossEngine::readSinc (int channel, double position) const noexcept
+float GrossEngine::readSinc (int channel, double position, int band) const noexcept
 {
     const auto* data = ring.getReadPointer (channel);
 
@@ -157,7 +187,7 @@ float GrossEngine::readSinc (int channel, double position) const noexcept
     const int    row      = juce::jmin ((int) tablePos, kPhases - 1);
     const float  t        = (float) (tablePos - row);
 
-    const float* c0 = sincTable + row * kTaps;
+    const float* c0 = sincTable + band * kBandStride + row * kTaps;
     const float* c1 = c0 + kTaps;
 
     double acc = 0.0;
@@ -174,12 +204,14 @@ float GrossEngine::readSinc (int channel, double position) const noexcept
     return (float) acc;
 }
 
-float GrossEngine::readSample (int channel, double position) const noexcept
+float GrossEngine::readSample (int channel, double position, int band) const noexcept
 {
     const double floored = std::floor (position);
 
-    // Tam sample konumu: interpolasyon yok, bypass bit-bit seffaf kalir
-    if (position == floored)
+    // Tam sample konumu ve normal hiz: interpolasyon yok, bypass bit-bit seffaf.
+    // Hizli okurken tam konumlar da suzulmeli - yoksa 2x gibi tam sayi hizlarda
+    // tum sample'lar bu yoldan gecip hic anti-alias uygulanmazdi.
+    if (band == 0 && position == floored)
     {
         int i = (int) std::fmod (floored, (double) ringLength);
         if (i < 0) i += ringLength;
@@ -193,7 +225,7 @@ float GrossEngine::readSample (int channel, double position) const noexcept
     double dist = (double) writePos - position;
     if (dist < 0.0) dist += (double) ringLength;
 
-    return dist >= (double) (kTaps / 2) ? readSinc (channel, position)
+    return dist >= (double) (kTaps / 2) ? readSinc (channel, position, band)
                                         : readHermite (channel, position);
 }
 
@@ -226,9 +258,27 @@ void GrossEngine::processBlock (juce::AudioBuffer<float>& buffer,
 
     for (int i = 0; i < numSamples; ++i)
     {
-        // 1) canli girisi halka buffer'a yaz
+        // 1) canli girisi halka buffer'a yaz, dalga formu icin tepe degerini topla
+        float inputPeak = 0.0f;
+
         for (int c = 0; c < channels; ++c)
+        {
             ringPtr[c][writePos] = bufPtr[c][i];
+            inputPeak = juce::jmax (inputPeak, std::abs (bufPtr[c][i]));
+        }
+
+        const int bin = juce::jlimit (0, kWaveBins - 1, (int) (phase * kWaveBins));
+
+        if (bin != waveBin)
+        {
+            if (waveBin >= 0)
+                wavePeaks[(size_t) waveBin].store (wavePeak, std::memory_order_relaxed);
+
+            waveBin  = bin;
+            wavePeak = 0.0f;
+        }
+
+        wavePeak = juce::jmax (wavePeak, inputPeak);
 
         // 2) zarflari bu faz noktasinda degerlendir
         const double timeVal    = timeEnabled ? timeEnv.valueAt (phase, timeSegment) : 0.0;
@@ -269,7 +319,16 @@ void GrossEngine::processBlock (juce::AudioBuffer<float>& buffer,
                 fadeReadPos = expected;      // eski kafa yoluna devam etsin
                 fadeCounter = fadeLength;
             }
+            else
+            {
+                // Okuma hizi = kafanin bu sample'da ilerledigi miktar.  Sicramalar
+                // haric tutuluyor; ~1 ms'lik yumusatma kesim frekansinin titremesini onluyor.
+                readSpeed += 0.02 * (std::abs (1.0 + diff) - readSpeed);
+            }
         }
+
+        const int band = juce::jlimit (0, kSincBands - 1,
+                                       (int) std::lround ((readSpeed - 1.0) * 4.0));
 
         // 5) oku, gerekiyorsa iki kafayi esit guclu crossfade ile birlestir
         double gOld = 0.0, gNew = 1.0;
@@ -284,10 +343,10 @@ void GrossEngine::processBlock (juce::AudioBuffer<float>& buffer,
 
         for (int c = 0; c < channels; ++c)
         {
-            double wetSample = readSample (c, readPos);
+            double wetSample = readSample (c, readPos, band);
 
             if (fadeCounter > 0)
-                wetSample = readSample (c, fadeReadPos) * gOld + wetSample * gNew;
+                wetSample = readSample (c, fadeReadPos, band) * gOld + wetSample * gNew;
 
             const double drySample = bufPtr[c][i];
             bufPtr[c][i] = (float) (drySample * dry + wetSample * gain * wet);

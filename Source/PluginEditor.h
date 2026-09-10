@@ -84,6 +84,9 @@ private:
     /** Snap izgarasini pattern uzunluguna gore yeniden hesaplar. */
     void refreshGrid();
 
+    /** Zarflari slota yazar, listeyi tazeler ve slotu secer. */
+    void commitSave (int slot, const juce::String& name);
+
     /** Kaydetmek icin hedef slot: secili slot kullaniciysa o, degilse ilk bos slot. */
     int chooseTargetSlot() const;
 
@@ -107,6 +110,11 @@ private:
     juce::ToggleButton timeDrawToggle { "DRAW" }, volDrawToggle { "DRAW" };
     juce::TextButton   timeShiftLeft  { "<" }, timeShiftRight { ">" };
     juce::TextButton   volShiftLeft   { "<" }, volShiftRight  { ">" };
+
+    // lane basina yumusatma (ms)
+    juce::Slider timeSmoothSlider { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
+    juce::Slider volSmoothSlider  { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
+    juce::Label  timeSmoothLabel, volSmoothLabel;
     ThemeButton themeButton;
     juce::ToggleButton timeToggle  { "TIME" };
     juce::ToggleButton volToggle   { "VOLUME" };
@@ -121,9 +129,11 @@ private:
     std::unique_ptr<APVTS::ButtonAttachment>   timeAttach, volAttach, midiAttach, latchAttach;
 
     std::unique_ptr<juce::FileChooser> fileChooser;
-    std::unique_ptr<APVTS::SliderAttachment>   mixAttach;
+    std::unique_ptr<APVTS::SliderAttachment>   mixAttach, timeSmoothAttach, volSmoothAttach;
 
     int lastSeenMidiPreset = -1;
+
+    std::vector<float> waveform = std::vector<float> ((size_t) KaradagBeatProcessor::waveformBins, 0.0f);
 
     std::vector<EnvelopeSnapshot> undoStack, redoStack;
     static constexpr int kMaxUndoSteps = 64;

@@ -29,6 +29,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout KaradagBeatProcessor::create
                     juce::ParameterID { "mix", 1 }, "Mix",
                     juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f));
 
+    // Yumusatma sureleri.  Kisa degerlerde ince ayar olsun diye egik aralik.
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID { "timeSmooth", 1 }, "Time Smooth",
+                    juce::NormalisableRange<float> (1.0f, 80.0f, 0.1f, 0.4f), 4.0f,
+                    juce::AudioParameterFloatAttributes().withLabel ("ms")));
+
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+                    juce::ParameterID { "volSmooth", 1 }, "Volume Smooth",
+                    juce::NormalisableRange<float> (0.5f, 80.0f, 0.1f, 0.4f), 2.0f,
+                    juce::AudioParameterFloatAttributes().withLabel ("ms")));
+
     layout.add (std::make_unique<juce::AudioParameterBool> (
                     juce::ParameterID { "midiTrigger", 1 }, "MIDI Trigger", true));
 
@@ -52,6 +63,8 @@ KaradagBeatProcessor::KaradagBeatProcessor()
     pMix         = apvts.getRawParameterValue ("mix");
     pMidiTrigger = apvts.getRawParameterValue ("midiTrigger");
     pMidiLatch   = apvts.getRawParameterValue ("midiLatch");
+    pTimeSmooth  = apvts.getRawParameterValue ("timeSmooth");
+    pVolSmooth   = apvts.getRawParameterValue ("volSmooth");
 
     // ses thread'inde nota eklerken bellek ayirmasin
     heldNotes.ensureStorageAllocated (128);
@@ -314,7 +327,7 @@ void KaradagBeatProcessor::saveUserSlotsToDisk() const
 }
 
 //==============================================================================
-void KaradagBeatProcessor::handleMidiTriggers (juce::MidiBuffer& midi)
+bool KaradagBeatProcessor::beginMidiBlock()
 {
     const bool enabled = pMidiTrigger->load() > 0.5f;
     const bool latch   = pMidiLatch  ->load() > 0.5f;
@@ -328,81 +341,70 @@ void KaradagBeatProcessor::handleMidiTriggers (juce::MidiBuffer& midi)
         wasLatching = latch;
     }
 
-    if (! enabled)
-        return;
-
-    for (const auto meta : midi)
-    {
-        const auto m = meta.getMessage();
-
-        if (m.isAllNotesOff() || m.isAllSoundOff())
-        {
-            heldNotes.clear();
-            latchedNote = -1;
-            midiActive.store (false);
-            continue;
-        }
-
-        if (latch)
-        {
-            // Latch: nota bir pattern'i acar, ayni nota tekrar basilinca kapatir.
-            // Notayi birakmak hicbir sey yapmaz - uzun freeze'ler icin piano
-            // roll'a uzun nota cizmek gerekmiyor.
-            if (! m.isNoteOn())
-                continue;
-
-            const int note  = m.getNoteNumber();
-            const int index = note - midiBaseNote;
-
-            if (note == latchedNote)
-            {
-                latchedNote = -1;
-                midiActive.store (false);
-            }
-            else if (juce::isPositiveAndBelow (index, Presets::kNumSlots))
-            {
-                latchedNote = note;
-                midiPreset.store (index);
-                midiActive.store (true);
-            }
-
-            continue;
-        }
-
-        if      (m.isNoteOn())  heldNotes.add (m.getNoteNumber());
-        else if (m.isNoteOff()) heldNotes.removeValue (m.getNoteNumber());
-        else                    continue;
-
-        // Basili notalardan slot araligina dusen en tizi kazanir.  Aralik
-        // disindaki bir nota, altindaki gecerli notayi gizlememeli.
-        int winner = -1;
-
-        for (int i = heldNotes.size() - 1; i >= 0 && winner < 0; --i)
-        {
-            const int index = heldNotes[i] - midiBaseNote;
-
-            if (juce::isPositiveAndBelow (index, Presets::kNumSlots))
-                winner = index;
-        }
-
-        if (winner >= 0)
-            midiPreset.store (winner);
-
-        midiActive.store (winner >= 0);
-    }
+    return enabled;
 }
 
-//==============================================================================
-void KaradagBeatProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
+void KaradagBeatProcessor::handleMidiMessage (const juce::MidiMessage& m)
 {
-    juce::ScopedNoDenormals noDenormals;
+    if (m.isAllNotesOff() || m.isAllSoundOff())
+    {
+        heldNotes.clear();
+        latchedNote = -1;
+        midiActive.store (false);
+        return;
+    }
 
-    for (int ch = getTotalNumInputChannels(); ch < getTotalNumOutputChannels(); ++ch)
-        buffer.clear (ch, 0, buffer.getNumSamples());
+    if (wasLatching)
+    {
+        // Latch: nota bir pattern'i acar, ayni nota tekrar basilinca kapatir.
+        // Notayi birakmak hicbir sey yapmaz - uzun freeze'ler icin piano
+        // roll'a uzun nota cizmek gerekmiyor.
+        if (! m.isNoteOn())
+            return;
 
-    handleMidiTriggers (midi);
+        const int note  = m.getNoteNumber();
+        const int index = note - midiBaseNote;
 
-    // --- hangi pattern calisacak? MIDI tetiklemesi parametreyi ezer ---
+        if (note == latchedNote)
+        {
+            latchedNote = -1;
+            midiActive.store (false);
+        }
+        else if (juce::isPositiveAndBelow (index, Presets::kNumSlots))
+        {
+            latchedNote = note;
+            midiPreset.store (index);
+            midiActive.store (true);
+        }
+
+        return;
+    }
+
+    if      (m.isNoteOn())  heldNotes.add (m.getNoteNumber());
+    else if (m.isNoteOff()) heldNotes.removeValue (m.getNoteNumber());
+    else                    return;
+
+    // Basili notalardan slot araligina dusen en tizi kazanir.  Aralik
+    // disindaki bir nota, altindaki gecerli notayi gizlememeli.
+    int winner = -1;
+
+    for (int i = heldNotes.size() - 1; i >= 0 && winner < 0; --i)
+    {
+        const int index = heldNotes[i] - midiBaseNote;
+
+        if (juce::isPositiveAndBelow (index, Presets::kNumSlots))
+            winner = index;
+    }
+
+    if (winner >= 0)
+        midiPreset.store (winner);
+
+    midiActive.store (winner >= 0);
+}
+
+void KaradagBeatProcessor::applyDesiredPreset()
+{
+    // MIDI tetiklemesi parametreyi ezer
     const int desiredPreset = midiActive.load() ? midiPreset.load()
                                                 : (int) pPreset->load();
 
@@ -417,8 +419,21 @@ void KaradagBeatProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             applySlotToAudioEnvelopes (desiredPreset);
             lastRequestedPreset = desiredPreset;
         }
-        // kilit o an GUI'deyse yukleme bir sonraki bloga kalir
+        // kilit o an GUI'deyse yukleme bir sonraki parcaya kalir
     }
+}
+
+//==============================================================================
+void KaradagBeatProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (int ch = getTotalNumInputChannels(); ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear (ch, 0, buffer.getNumSamples());
+
+    const bool midiEnabled = beginMidiBlock();
+
+    applyDesiredPreset();
 
     // --- GUI'den elle duzenlenmis zarf geldi mi? ---
     if (hasPending.load())
@@ -473,6 +488,7 @@ void KaradagBeatProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     const double samplesPerBeat = (60.0 / bpm) * sampleRateHz;
 
     engine.setPatternLengthSamples (patternBeats * samplesPerBeat);
+    engine.setSmoothing (pTimeSmooth->load(), pVolSmooth->load());
 
     if (playing && havePpq)
     {
@@ -484,12 +500,42 @@ void KaradagBeatProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         engine.setPhase (phase);
     }
 
-    engine.processBlock (buffer,
-                         audioTime,
-                         audioVolume,
-                         pTimeOn->load() > 0.5f,
-                         pVolOn ->load() > 0.5f,
-                         pMix   ->load());
+    // --- blogu MIDI olaylarinin dustugu noktalarda bolerek isle ---
+    // Pattern degisimi, notanin blok icindeki tam sample'inda gerceklessin.
+    // Aksi halde vurusa konan bir nota pattern'i bir buffer boyu erken degistirir.
+    const bool  timeOn = pTimeOn->load() > 0.5f;
+    const bool  volOn  = pVolOn ->load() > 0.5f;
+    const float mix    = pMix   ->load();
+
+    const int numSamples = buffer.getNumSamples();
+    int cursor = 0;
+
+    auto renderUntil = [&] (int end)
+    {
+        end = juce::jlimit (cursor, numSamples, end);
+
+        if (end > cursor)
+        {
+            juce::AudioBuffer<float> part (buffer.getArrayOfWritePointers(),
+                                           buffer.getNumChannels(), cursor, end - cursor);
+
+            engine.processBlock (part, audioTime, audioVolume, timeOn, volOn, mix);
+        }
+
+        cursor = end;
+    };
+
+    if (midiEnabled)
+    {
+        for (const auto meta : midi)
+        {
+            renderUntil (meta.samplePosition);
+            handleMidiMessage (meta.getMessage());
+            applyDesiredPreset();
+        }
+    }
+
+    renderUntil (numSamples);
 
     displayPhase.store (engine.getPhase());
 }

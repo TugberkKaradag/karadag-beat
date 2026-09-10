@@ -840,6 +840,148 @@ int main()
     }
 
     // ------------------------------------------------------------------
+    std::printf ("\nDalga formu dilimleri\n");
+    {
+        // Pattern'in yalnizca ilk ceyreginde 0.5 genlikli ses, gerisi sessiz.
+        // Iki tur sonra ilk ceyregin dilimleri ~0.5, kalanlar 0 olmali.
+        Envelope t (0.0), v (1.0);
+
+        GrossEngine engine;
+        engine.prepare (kSampleRate, 1);
+        engine.setPatternLengthSamples (patternLenSamples);
+        engine.setPhase (0.0);
+
+        juce::AudioBuffer<float> block (1, kBlockSize);
+        const int total = patLen * 2;
+
+        for (int n = 0; n < total; n += kBlockSize)
+        {
+            for (int i = 0; i < kBlockSize; ++i)
+            {
+                const double phase = std::fmod ((double) (n + i) / patternLenSamples, 1.0);
+                block.setSample (0, i, phase < 0.25 ? 0.5f : 0.0f);
+            }
+
+            engine.processBlock (block, t, v, true, true, 1.0f);
+        }
+
+        const int bins    = GrossEngine::kWaveBins;
+        const int quarter = bins / 4;
+
+        float loudMin = 1.0f, quietMax = 0.0f;
+
+        for (int b = 1; b < quarter - 1; ++b)      loudMin  = juce::jmin (loudMin,  engine.getWavePeak (b));
+        for (int b = quarter + 1; b < bins - 1; ++b) quietMax = juce::jmax (quietMax, engine.getWavePeak (b));
+
+        check (std::abs (loudMin - 0.5f) < 1.0e-4f && quietMax < 1.0e-6f,
+               "sesin dustugu dilimler dolu, digerleri bos",
+               "ilk ceyrek en az " + juce::String (loudMin, 3)
+                 + ", kalan en fazla " + juce::String (quietMax, 5));
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nSMOOTH sureleri\n");
+    {
+        // Volume: DC giris + Gate 1/8.  Ilk kapanma kenari 12000. sample'da;
+        // cikisin 0.9'dan 0.1'e inmesi slew suresinin %80'i kadar surmeli.
+        const auto& gate = preset ("Gate 1/8");
+
+        for (const double ms : { 2.0, 20.0, 60.0 })
+        {
+            auto t = fromPoints (gate.time, 0.0);
+            auto v = fromPoints (gate.volume, 1.0);
+
+            GrossEngine engine;
+            engine.prepare (kSampleRate, 1);
+            engine.setPatternLengthSamples (patternLenSamples);
+            engine.setSmoothing (4.0, ms);
+            engine.setPhase (0.0);
+
+            juce::AudioBuffer<float> block (1, kBlockSize);
+            std::vector<float> out;
+
+            for (int b = 0; b < 60; ++b)
+            {
+                for (int i = 0; i < kBlockSize; ++i)
+                    block.setSample (0, i, 1.0f);
+
+                engine.processBlock (block, t, v, true, true, 1.0f);
+
+                for (int i = 0; i < kBlockSize; ++i)
+                    out.push_back (block.getSample (0, i));
+            }
+
+            int hi = -1, lo = -1;
+
+            for (int i = 12000; i < (int) out.size(); ++i)
+            {
+                if (hi < 0 && out[(size_t) i] < 0.9f) hi = i;
+                if (lo < 0 && out[(size_t) i] < 0.1f) { lo = i; break; }
+            }
+
+            const double measured = (lo - hi) / kSampleRate * 1000.0;
+            const double expected = 0.8 * ms;
+
+            check (hi > 0 && lo > 0 && std::abs (measured - expected) < expected * 0.05 + 0.05,
+                   "volume smooth " + juce::String (ms, 0) + " ms",
+                   "%90 -> %10: " + juce::String (measured, 2) + " ms, beklenen "
+                     + juce::String (expected, 2) + " ms");
+        }
+
+        // Time: yavasca yukselen bir rampa girisi.  Repeat 1/8'de 12000. sample'da
+        // gecikme 0'dan 12000'e sicriyor; eski kafa x[n], yeni kafa x[n-12000].
+        // Cikisin eski kafadan yeni kafaya gecisi capraz gecis suresi kadar surmeli.
+        const auto& repeat = preset ("Repeat 1/8");
+
+        for (const double ms : { 4.0, 30.0 })
+        {
+            auto t = fromPoints (repeat.time, 0.0);
+            auto v = fromPoints (repeat.volume, 1.0);
+
+            GrossEngine engine;
+            engine.prepare (kSampleRate, 1);
+            engine.setPatternLengthSamples (patternLenSamples);
+            engine.setSmoothing (ms, 2.0);
+            engine.setPhase (0.0);
+
+            const double slope = 1.0e-5;
+            juce::AudioBuffer<float> block (1, kBlockSize);
+            std::vector<float> out;
+            int n = 0;
+
+            for (int b = 0; b < 60; ++b)
+            {
+                for (int i = 0; i < kBlockSize; ++i)
+                    block.setSample (0, i, (float) (slope * n++));
+
+                engine.processBlock (block, t, v, true, true, 1.0f);
+
+                for (int i = 0; i < kBlockSize; ++i)
+                    out.push_back (block.getSample (0, i));
+            }
+
+            // cikisin yeni kafaya gore kalan payi: 1 = tamamen eski, 0 = tamamen yeni
+            auto oldShare = [&] (int i) { return (out[(size_t) i] - slope * (i - 12000)) / (slope * 12000.0); };
+
+            int hi = -1, lo = -1;
+
+            for (int i = 12000; i < 20000; ++i)
+            {
+                if (hi < 0 && oldShare (i) < 0.9) hi = i;
+                if (lo < 0 && oldShare (i) < 0.1) { lo = i; break; }
+            }
+
+            const double measured = (lo - hi) / kSampleRate * 1000.0;
+            const double expected = 0.8 * ms;
+
+            check (hi > 0 && lo > 0 && std::abs (measured - expected) < expected * 0.05 + 0.05,
+                   "time smooth " + juce::String (ms, 0) + " ms",
+                   "capraz gecis %90 -> %10: " + juce::String (measured, 2) + " ms, beklenen "
+                     + juce::String (expected, 2) + " ms");
+        }
+    }
+
+    // ------------------------------------------------------------------
     std::printf ("\nTum fabrika pattern'lerinde saglik kontrolu (437 Hz)\n");
     {
         for (const auto& pr : Presets::factory())

@@ -593,6 +593,42 @@ void EnvelopeEditor::drawCurve (juce::Graphics& g) const
     g.strokePath (curve, juce::PathStrokeType (2.0f));
 }
 
+void EnvelopeEditor::drawWaveform (juce::Graphics& g) const
+{
+    const int bins = (int) waveform.size();
+
+    if (bins < 2)
+        return;
+
+    // Sessiz malzeme de gorunsun diye dB olcegi: -48 dBFS ... 0 dBFS -> 0 ... 1
+    auto shape = [] (float peak)
+    {
+        if (peak <= 1.0e-5f)
+            return 0.0f;
+
+        return juce::jlimit (0.0f, 1.0f, (20.0f * std::log10 (peak) + 48.0f) / 48.0f);
+    };
+
+    const float centre = plot.getCentreY();
+    const float half   = plot.getHeight() * 0.46f;
+
+    juce::Path wave;
+    wave.startNewSubPath (plot.getX(), centre);
+
+    for (int i = 0; i < bins; ++i)
+        wave.lineTo (xToPixel ((i + 0.5) / bins), centre - half * shape (waveform[(size_t) i]));
+
+    wave.lineTo (plot.getRight(), centre);
+
+    for (int i = bins - 1; i >= 0; --i)
+        wave.lineTo (xToPixel ((i + 0.5) / bins), centre + half * shape (waveform[(size_t) i]));
+
+    wave.closeSubPath();
+
+    g.setColour (Themes::current().text.withAlpha (0.07f));
+    g.fillPath (wave);
+}
+
 void EnvelopeEditor::drawHandles (juce::Graphics& g) const
 {
     if (drawMode)
@@ -709,6 +745,7 @@ void EnvelopeEditor::paint (juce::Graphics& g)
     drawRuler (g);
 
     drawGrid (g);
+    drawWaveform (g);
     drawCurve (g);
 
     // calan kafa

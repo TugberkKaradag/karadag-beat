@@ -253,6 +253,19 @@ KaradagBeatEditor::KaradagBeatEditor (KaradagBeatProcessor& p)
     for (auto* b : { &timeShiftLeft, &timeShiftRight, &volShiftLeft, &volShiftRight })
         addAndMakeVisible (b);
 
+    // --- yumusatma ---
+    timeSmoothSlider.setTooltip ("Crossfade length at time jumps  -  longer gives washier stutters");
+    volSmoothSlider .setTooltip ("How fast the volume may change  -  longer turns hard gates into a soft tremolo");
+
+    for (auto* sl : { &timeSmoothSlider, &volSmoothSlider })
+    {
+        sl->setPopupDisplayEnabled (true, true, this);
+        addAndMakeVisible (sl);
+    }
+
+    for (auto* l : { &timeSmoothLabel, &volSmoothLabel })
+        addAndMakeVisible (l);
+
     undoButton.onClick = [this] { undo(); };
     redoButton.onClick = [this] { redo(); };
     updateUndoButtons();
@@ -303,6 +316,12 @@ KaradagBeatEditor::KaradagBeatEditor (KaradagBeatProcessor& p)
     midiAttach   = std::make_unique<APVTS::ButtonAttachment>   (processor.apvts, "midiTrigger", midiToggle);
     latchAttach  = std::make_unique<APVTS::ButtonAttachment>   (processor.apvts, "midiLatch", latchToggle);
     mixAttach    = std::make_unique<APVTS::SliderAttachment>   (processor.apvts, "mix", mixSlider);
+
+    timeSmoothAttach = std::make_unique<APVTS::SliderAttachment> (processor.apvts, "timeSmooth", timeSmoothSlider);
+    volSmoothAttach  = std::make_unique<APVTS::SliderAttachment> (processor.apvts, "volSmooth",  volSmoothSlider);
+
+    for (auto* sl : { &timeSmoothSlider, &volSmoothSlider })
+        sl->setTextValueSuffix (" ms");
 
     Themes::loadPreference();
     applyThemeColours();
@@ -457,6 +476,17 @@ void KaradagBeatEditor::applyThemeColours()
     latchToggle.setColour (juce::TextButton::buttonOnColourId, th().timeAccent);
     timeDrawToggle.setColour (juce::TextButton::buttonOnColourId, th().timeAccent);
     volDrawToggle .setColour (juce::TextButton::buttonOnColourId, th().volumeAccent);
+
+    timeSmoothSlider.setColour (juce::Slider::trackColourId, th().timeAccent.withAlpha (0.8f));
+    timeSmoothSlider.setColour (juce::Slider::thumbColourId, th().timeAccent);
+    volSmoothSlider .setColour (juce::Slider::trackColourId, th().volumeAccent.withAlpha (0.8f));
+    volSmoothSlider .setColour (juce::Slider::thumbColourId, th().volumeAccent);
+
+    for (auto* sl : { &timeSmoothSlider, &volSmoothSlider })
+        sl->setColour (juce::Slider::backgroundColourId, juce::Colours::white.withAlpha (0.08f));
+
+    styleLabel (timeSmoothLabel, "SMOOTH", 9.5f, th().textDim, juce::Justification::centredRight);
+    styleLabel (volSmoothLabel,  "SMOOTH", 9.5f, th().textDim, juce::Justification::centredRight);
 
     for (auto* b : { &saveButton, &undoButton, &redoButton, &fileButton,
                      &timeShiftLeft, &timeShiftRight, &volShiftLeft, &volShiftRight })
@@ -672,18 +702,63 @@ void KaradagBeatEditor::promptSaveToSlot()
             if (auto* box = window->getComboBoxComponent ("slot"))
                 slot += juce::jmax (0, box->getSelectedItemIndex());
 
-            if (processor.saveEditorToSlot (slot, name))
+            // Kendi slotunu yukleyip ayni yere geri kaydetmek bilincli bir hareket;
+            // yalnizca BASKA bir dolu slotun uzerine yazarken sor - kaydedilmis bir
+            // pattern'in uzerine yazmak geri alinamiyor.
+            const bool overwritesOther = processor.isSlotFilled (slot)
+                                      && slot != presetBox.getSelectedItemIndex();
+
+            if (! overwritesOther)
             {
-                refreshSlotNames();
-                presetBox.setSelectedItemIndex (slot, juce::sendNotificationSync);
+                commitSave (slot, name);
+                return;
             }
+
+            // Hazir mesaj kutusu ilk dugmeye Enter kisayolunu bagliyor.  Kaydet
+            // penceresinde de Enter = Save oldugu icin iki kez Enter'a basmak
+            // farkinda olmadan bir pattern'in uzerine yazardi.  Burada yikici
+            // dugmenin kisayolu yok; Escape vazgecer.
+            auto* confirm = new juce::AlertWindow ("Overwrite pattern?",
+                                                   "Slot " + juce::String (slot + 1) + " already holds \""
+                                                     + processor.getSlotName (slot) + "\".\n"
+                                                     "Saving will replace it and cannot be undone.",
+                                                   juce::MessageBoxIconType::WarningIcon);
+
+            confirm->addButton ("Overwrite", 1);
+            confirm->addButton ("Cancel",    0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+            confirm->addToDesktop (0);
+            confirm->centreAroundComponent (this, confirm->getWidth(), confirm->getHeight());
+
+            confirm->enterModalState (true,
+                juce::ModalCallbackFunction::create ([this, slot, name] (int choice)
+                {
+                    if (choice == 1)
+                        commitSave (slot, name);
+                }),
+                true);
         }),
         true);
+}
+
+void KaradagBeatEditor::commitSave (int slot, const juce::String& name)
+{
+    if (processor.saveEditorToSlot (slot, name))
+    {
+        refreshSlotNames();
+        presetBox.setSelectedItemIndex (slot, juce::sendNotificationSync);
+    }
 }
 
 //==============================================================================
 void KaradagBeatEditor::timerCallback()
 {
+    for (int i = 0; i < KaradagBeatProcessor::waveformBins; ++i)
+        waveform[(size_t) i] = processor.getWaveformPeak (i);
+
+    timeEditor  .setWaveform (waveform);
+    volumeEditor.setWaveform (waveform);
+
     const double phase = processor.getPlayheadPhase();
     timeEditor  .setPlayheadPhase (phase);
     volumeEditor.setPlayheadPhase (phase);
@@ -828,6 +903,9 @@ void KaradagBeatEditor::resized()
         timeShiftRight.setBounds (header.removeFromRight (22).reduced (0, 2));
         header.removeFromRight (2);
         timeShiftLeft .setBounds (header.removeFromRight (22).reduced (0, 2));
+        header.removeFromRight (12);
+        timeSmoothSlider.setBounds (header.removeFromRight (100));
+        timeSmoothLabel .setBounds (header.removeFromRight (50));
         header.removeFromLeft (8);
         timeLabel.setBounds (header);
         timeEditor.setBounds (timeArea.withTrimmedBottom (6));
@@ -843,6 +921,9 @@ void KaradagBeatEditor::resized()
         volShiftRight.setBounds (header.removeFromRight (22).reduced (0, 2));
         header.removeFromRight (2);
         volShiftLeft .setBounds (header.removeFromRight (22).reduced (0, 2));
+        header.removeFromRight (12);
+        volSmoothSlider.setBounds (header.removeFromRight (100));
+        volSmoothLabel .setBounds (header.removeFromRight (50));
         header.removeFromLeft (8);
         volLabel.setBounds (header);
         volumeEditor.setBounds (volArea);

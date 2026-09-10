@@ -291,6 +291,58 @@ int main()
     }
 
     // ------------------------------------------------------------------
+    std::printf ("\nMIDI olayi blok icinde tam yerinde uygulaniyor\n");
+    {
+        // Sabit (DC) giris, secili pattern Off: cikis = 1.0.  Blogun 300. sample'inda
+        // Sidechain 1/4 notasi geliyor; pump pattern'in basi sifira yakin oldugu icin
+        // degisim cikista hemen gorunur.  Notadan onceki 300 sample'a dokunulmamali.
+        const int slot = Presets::names().indexOf ("Sidechain 1/4");
+        jassert (slot >= 0);
+
+        KaradagBeatProcessor proc;
+        proc.prepareToPlay (48000.0, 512);
+
+        juce::AudioBuffer<float> buffer (1, 512);
+        juce::MidiBuffer midi;
+
+        auto runBlock = [&] (const juce::MidiMessage& m, int position)
+        {
+            for (int i = 0; i < 512; ++i)
+                buffer.setSample (0, i, 1.0f);
+
+            midi.clear();
+            midi.addEvent (m, position);
+            proc.processBlock (buffer, midi);
+        };
+
+        runBlock (juce::MidiMessage::noteOn (1, 60 + slot, 0.8f), 300);
+
+        float worstBefore = 0.0f;
+
+        for (int i = 0; i < 300; ++i)
+            worstBefore = juce::jmax (worstBefore, std::abs (buffer.getSample (0, i) - 1.0f));
+
+        const float after = buffer.getSample (0, 480);
+
+        check (worstBefore < 1.0e-6f && after < 0.6f,
+               "nota oncesi dokunulmadan, nota sonrasi pattern devrede",
+               "nota oncesi en buyuk sapma " + juce::String (worstBefore, 4)
+                 + ", 480. sample " + juce::String (after, 3));
+
+        // Bir sonraki blogun 200. sample'inda nota birakiliyor: o ana kadar pump
+        // devam etmeli, sonra (2 ms'lik rampayla) tekrar tam sese donmeli.
+        runBlock (juce::MidiMessage::noteOff (1, 60 + slot), 200);
+
+        const float stillPumping = buffer.getSample (0, 190);
+        const float released     = buffer.getSample (0, 500);
+
+        check (stillPumping < 0.9f && released > 0.99f,
+               "nota birakildigi sample'da pattern kapaniyor",
+               "190. sample " + juce::String (stillPumping, 3)
+                 + ", 500. sample " + juce::String (released, 3));
+    }
+
+    // ------------------------------------------------------------------
     std::printf ("\nPattern disa / ice aktarma\n");
     {
         const auto file = juce::File::getSpecialLocation (juce::File::tempDirectory)
