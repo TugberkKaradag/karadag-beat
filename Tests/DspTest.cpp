@@ -1,0 +1,890 @@
+/*
+    Karadag Beat - DSP dogrulama testleri.
+
+    Motoru host olmadan calistirip cikisi olcer:
+      - bypass gercekten seffaf mi
+      - half time gercekten yarim hizda mi (perde bir oktav dusuyor mu)
+      - stutter dogru dilimi mi tekrarliyor
+      - gate gercekten susturuyor mu
+      - basamakli pattern'lerde tik (klik) var mi
+*/
+
+#include <juce_audio_basics/juce_audio_basics.h>
+#include "../Source/Envelope.h"
+#include "../Source/GrossEngine.h"
+#include "../Source/Presets.h"
+
+#include <cmath>
+#include <cstdio>
+#include <vector>
+
+namespace
+{
+    constexpr double kSampleRate = 48000.0;
+    constexpr double kBpm        = 120.0;
+    constexpr int    kBlockSize  = 256;
+
+    // 120 BPM 4/4 -> 2 bar = 8 ceyrek nota = 4 saniye
+    const double patternLenSamples = (8.0 * 60.0 / kBpm) * kSampleRate;
+
+    int failures = 0;
+
+    void check (bool condition, const juce::String& what, const juce::String& detail = {})
+    {
+        std::printf ("  [%s] %-46s %s\n",
+                     condition ? "GECTI" : "KALDI",
+                     what.toRawUTF8(),
+                     detail.toRawUTF8());
+
+        if (! condition)
+            ++failures;
+    }
+
+    struct RunConfig
+    {
+        double sampleRate  = kSampleRate;
+        double bpm         = kBpm;
+        int    blockSize   = kBlockSize;
+        double beatsPerBar = 4.0;      // ceyrek nota cinsinden
+
+        double patternLength() const
+        {
+            return (2.0 * beatsPerBar * 60.0 / bpm) * sampleRate;
+        }
+    };
+
+    /** Motoru verilen zarflarla n pattern boyunca calistirip cikisi dondurur. */
+    std::vector<float> run (const Envelope& timeEnv,
+                            const Envelope& volEnv,
+                            double inputFreq,
+                            int    numPatterns,
+                            RunConfig cfg = {},
+                            bool   timeOn = true,
+                            bool   volOn  = true)
+    {
+        const double patLength = cfg.patternLength();
+
+        GrossEngine engine;
+        engine.prepare (cfg.sampleRate, 1);
+        engine.setPatternLengthSamples (patLength);
+        engine.setPhase (0.0);
+
+        const int total = (int) (patLength * numPatterns);
+        std::vector<float> out;
+        out.reserve ((size_t) total + (size_t) cfg.blockSize);
+
+        juce::AudioBuffer<float> block (1, cfg.blockSize);
+        double phaseAcc = 0.0;
+        const double inc = juce::MathConstants<double>::twoPi * inputFreq / cfg.sampleRate;
+
+        for (int written = 0; written < total; written += cfg.blockSize)
+        {
+            auto* d = block.getWritePointer (0);
+
+            for (int i = 0; i < cfg.blockSize; ++i)
+            {
+                d[i] = (float) std::sin (phaseAcc);
+                phaseAcc += inc;
+            }
+
+            engine.processBlock (block, timeEnv, volEnv, timeOn, volOn, 1.0f);
+
+            for (int i = 0; i < cfg.blockSize; ++i)
+                out.push_back (d[i]);
+        }
+
+        return out;
+    }
+
+    /** Bir pencerede sifir gecislerinden frekans tahmini. */
+    double estimateFrequency (const std::vector<float>& x, int start, int length,
+                              double sampleRate = kSampleRate)
+    {
+        start  = juce::jlimit (0, (int) x.size() - 1, start);
+        length = juce::jmin (length, (int) x.size() - start);
+
+        if (length < 32)
+            return 0.0;
+
+        int crossings = 0;
+
+        for (int i = start + 1; i < start + length; ++i)
+            if ((x[(size_t) i - 1] <= 0.0f) != (x[(size_t) i] <= 0.0f))
+                ++crossings;
+
+        const double seconds = length / sampleRate;
+        return (crossings / 2.0) / seconds;
+    }
+
+    double rms (const std::vector<float>& x, int start, int length)
+    {
+        start  = juce::jlimit (0, (int) x.size() - 1, start);
+        length = juce::jmin (length, (int) x.size() - start);
+
+        if (length <= 0)
+            return 0.0;
+
+        double sum = 0.0;
+
+        for (int i = start; i < start + length; ++i)
+            sum += (double) x[(size_t) i] * x[(size_t) i];
+
+        return std::sqrt (sum / length);
+    }
+
+    /** Ardisik sample'lar arasindaki en buyuk sicrama - klik olcusu. */
+    float maxJump (const std::vector<float>& x, int start, int length)
+    {
+        start  = juce::jlimit (0, (int) x.size() - 1, start);
+        length = juce::jmin (length, (int) x.size() - start);
+
+        float worst = 0.0f;
+
+        for (int i = start + 1; i < start + length; ++i)
+            worst = juce::jmax (worst, std::abs (x[(size_t) i] - x[(size_t) i - 1]));
+
+        return worst;
+    }
+
+    /** Eski (dogrusal arama) valueAt - yeni hizli yollarin referansi. */
+    double referenceValueAt (const std::vector<EnvPoint>& pts, double phase)
+    {
+        if (pts.size() == 1)
+            return pts[0].y;
+
+        phase -= std::floor (phase);
+
+        const EnvPoint* p0; const EnvPoint* p1;
+        double x0, x1;
+
+        if (phase < pts.front().x)
+        {
+            p0 = &pts.back();  x0 = p0->x - 1.0;
+            p1 = &pts.front(); x1 = p1->x;
+        }
+        else
+        {
+            size_t i = pts.size() - 1;
+
+            for (size_t n = 1; n < pts.size(); ++n)
+                if (pts[n].x > phase) { i = n - 1; break; }
+
+            p0 = &pts[i]; x0 = p0->x;
+
+            if (i + 1 < pts.size()) { p1 = &pts[i + 1];  x1 = p1->x; }
+            else                    { p1 = &pts.front(); x1 = p1->x + 1.0; }
+        }
+
+        if (p0->stepped)
+            return p0->y;
+
+        const double span = x1 - x0;
+
+        if (span <= 1.0e-12)
+            return p1->y;
+
+        double t = juce::jlimit (0.0, 1.0, (phase - x0) / span);
+
+        if (std::abs (p0->tension) >= 1.0e-9)
+            t = std::pow (t, std::pow (2.0, -p0->tension * 4.0));
+
+        return p0->y + (p1->y - p0->y) * t;
+    }
+
+    Envelope fromPoints (const std::vector<EnvPoint>& pts, double fallbackValue)
+    {
+        Envelope e (fallbackValue);
+
+        if (! pts.empty())
+            e.setPoints (pts);
+
+        return e;
+    }
+
+    const GrossPreset& preset (const juce::String& name)
+    {
+        for (const auto& p : Presets::factory())
+            if (p.name == name)
+                return p;
+
+        jassertfalse;
+        return Presets::factory().front();
+    }
+}
+
+//==============================================================================
+int main()
+{
+    std::printf ("\nKaradag Beat - DSP testleri  (%.0f Hz, %.0f BPM, pattern = %.0f sample)\n\n",
+                 kSampleRate, kBpm, patternLenSamples);
+
+    const int patLen = (int) patternLenSamples;
+
+    // ------------------------------------------------------------------
+    std::printf ("Zarf matematigi\n");
+    {
+        Envelope e (0.0);
+        e.setPoints ({ { 0.0, 0.0 }, { 1.0, 0.5 } });
+
+        check (std::abs (e.valueAt (0.0) - 0.0)  < 1e-9, "rampa basi 0");
+        check (std::abs (e.valueAt (0.5) - 0.25) < 1e-9, "rampa ortasi 0.25");
+        check (std::abs (e.valueAt (0.999) - 0.4995) < 1e-3, "rampa sonu ~0.5");
+
+        Envelope s (0.0);
+        s.setPoints ({ { 0.0, 0.2, 0.0, true }, { 0.5, 0.8, 0.0, true } });
+
+        check (std::abs (s.valueAt (0.3) - 0.2) < 1e-9, "basamak degeri sabit tutuyor");
+        check (std::abs (s.valueAt (0.7) - 0.8) < 1e-9, "ikinci basamak dogru");
+
+        Envelope w (0.0);
+        w.setPoints ({ { 0.25, 1.0 }, { 0.75, 0.0 } });
+        check (w.valueAt (0.0) > 0.4 && w.valueAt (0.0) < 0.6, "pattern sonu basa sariliyor");
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nZarf kaydirma (shift)\n");
+    {
+        double worst = 0.0;
+        int    cases = 0;
+
+        for (const auto& pr : Presets::factory())
+        {
+            for (const auto* src : { &pr.time, &pr.volume })
+            {
+                if (src->empty())
+                    continue;
+
+                Envelope original (0.0);
+                original.setPoints (*src);
+
+                // 1/16, 1/8 ve uclemeli 1/24 adimlar, iki yonde
+                for (const double dx : { 1.0 / 32.0, 5.0 / 16.0, -1.0 / 8.0, 1.0 / 24.0, -7.0 / 24.0 })
+                {
+                    Envelope shifted (0.0);
+                    shifted.setPoints (*src);
+                    shifted.shift (dx);
+
+                    for (int i = 0; i < 997; ++i)
+                    {
+                        // sicrama noktalarinin tam ustune dusmeyen ornekler
+                        const double phase = (i + 0.37) / 997.0;
+                        worst = juce::jmax (worst, std::abs (shifted.valueAt (phase + dx)
+                                                             - original.valueAt (phase)));
+                    }
+
+                    ++cases;
+                }
+            }
+        }
+
+        check (worst < 1.0e-6, "kaydirilmis zarf = zamanda kaymis orijinal",
+               juce::String (cases) + " durum, en buyuk fark " + juce::String (worst, 9));
+
+        // 24 kez 1/24 kaydirinca tam tur atip basa donmeli
+        const auto& half = preset ("Half Time");
+        Envelope e (0.0);
+        e.setPoints (half.time);
+
+        for (int i = 0; i < 24; ++i)
+            e.shift (1.0 / 24.0);
+
+        double drift = 0.0;
+
+        for (int i = 0; i < 997; ++i)
+        {
+            const double phase = (i + 0.37) / 997.0;
+            Envelope ref (0.0);
+            ref.setPoints (half.time);
+            drift = juce::jmax (drift, std::abs (e.valueAt (phase) - ref.valueAt (phase)));
+        }
+
+        check (drift < 1.0e-6, "tam tur kaydirma zarfi aynen geri getiriyor",
+               "fark " + juce::String (drift, 9));
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nCizim modu (hucre boyama)\n");
+    {
+        // duz zarf: yalnizca boyanan hucre degismeli, oncesi ve sonrasi ayni kalmali
+        Envelope flat (0.0);
+        flat.paintStep (0.25, 0.5, 0.8);
+
+        check (std::abs (flat.valueAt (0.1)) < 1e-9
+                 && std::abs (flat.valueAt (0.3) - 0.8) < 1e-9
+                 && std::abs (flat.valueAt (0.6)) < 1e-9,
+               "duz zarfta boyanan hucre disi dokunulmadan kaliyor",
+               juce::String (flat.valueAt (0.1), 3) + " / " + juce::String (flat.valueAt (0.3), 3)
+                 + " / " + juce::String (flat.valueAt (0.6), 3));
+
+        // rampa: once ve sonrasi ayni rampa uzerinde kalmali
+        Envelope ramp (0.0);
+        ramp.setPoints ({ { 0.0, 0.0 }, { 1.0, 0.5 } });
+        ramp.paintStep (0.5, 0.5625, 0.0);
+
+        check (std::abs (ramp.valueAt (0.25) - 0.125) < 1e-9
+                 && std::abs (ramp.valueAt (0.53)) < 1e-9
+                 && std::abs (ramp.valueAt (0.75) - 0.375) < 1e-9,
+               "rampada hucre oncesi ve sonrasi korunuyor",
+               juce::String (ramp.valueAt (0.25), 4) + " / " + juce::String (ramp.valueAt (0.53), 4)
+                 + " / " + juce::String (ramp.valueAt (0.75), 4));
+
+        // ardisik hucreler: nokta sayisi sismemeli, her hucre kendi degerinde olmali
+        Envelope gate (1.0);
+
+        for (int k = 0; k < 16; ++k)
+            gate.paintStep (k / 16.0, (k + 1) / 16.0, (k % 2) ? 0.0 : 1.0);
+
+        bool ok = true;
+
+        for (int k = 0; k < 16; ++k)
+            ok = ok && std::abs (gate.valueAt ((k + 0.5) / 16.0) - ((k % 2) ? 0.0 : 1.0)) < 1e-9;
+
+        // ayni hucreleri tekrar boyamak nokta biriktirmemeli
+        const int before = gate.getNumPoints();
+
+        for (int k = 0; k < 16; ++k)
+            gate.paintStep (k / 16.0, (k + 1) / 16.0, (k % 2) ? 0.0 : 1.0);
+
+        check (ok && gate.getNumPoints() == before,
+               "boyanan gate dogru ve tekrar boyama nokta biriktirmiyor",
+               juce::String (gate.getNumPoints()) + " nokta");
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nHizli zarf aramasi eski algoritmayla birebir ayni\n");
+    {
+        std::vector<std::vector<EnvPoint>> cases;
+
+        for (const auto& pr : Presets::factory())
+        {
+            if (! pr.time.empty())   cases.push_back (pr.time);
+            if (! pr.volume.empty()) cases.push_back (pr.volume);
+        }
+
+        // rastgele zarflar - ayni x'te nokta ciftleri de dahil
+        juce::Random rng (1234);
+
+        for (int c = 0; c < 40; ++c)
+        {
+            std::vector<EnvPoint> pts;
+            const int count = 1 + rng.nextInt (40);
+
+            for (int i = 0; i < count; ++i)
+            {
+                const double x = (rng.nextInt (5) == 0 && ! pts.empty()) ? pts.back().x
+                                                                         : rng.nextDouble();
+                pts.emplace_back (x, rng.nextDouble(), rng.nextDouble() * 2.0 - 1.0, rng.nextBool());
+            }
+
+            Envelope e (0.0);
+            e.setPoints (pts);            // siralar ve sinirlar
+            cases.push_back (e.getPoints());
+        }
+
+        double worstPlain = 0.0, worstHinted = 0.0;
+
+        for (const auto& pts : cases)
+        {
+            Envelope e (0.0);
+            e.setPoints (pts);
+
+            int hint = 0;
+
+            // uc tur, dengesiz adimlarla ileri - arada bir geriye de sicra
+            double phase = 0.0;
+
+            for (int i = 0; i < 6000; ++i)
+            {
+                phase += (i % 500 == 499) ? -0.37 : 1.0 / 1997.0;
+
+                const double ref = referenceValueAt (e.getPoints(), phase);
+                worstPlain  = juce::jmax (worstPlain,  std::abs (e.valueAt (phase) - ref));
+                worstHinted = juce::jmax (worstHinted, std::abs (e.valueAt (phase, hint) - ref));
+            }
+        }
+
+        check (worstPlain < 1.0e-12, "ikili arama referansla ayni",
+               juce::String ((int) cases.size()) + " zarf, en buyuk fark " + juce::String (worstPlain, 15));
+        check (worstHinted < 1.0e-12, "ipuclu arama referansla ayni",
+               "en buyuk fark " + juce::String (worstHinted, 15));
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nBypass seffafligi\n");
+    {
+        Envelope t (0.0), v (1.0);
+        const auto out = run (t, v, 500.0, 2);
+
+        // ilk pattern buffer dolarken atlanir
+        double worst = 0.0;
+        double phaseAcc = 0.0;
+        const double inc = juce::MathConstants<double>::twoPi * 500.0 / kSampleRate;
+
+        for (int i = 0; i < (int) out.size(); ++i)
+        {
+            const double expected = std::sin (phaseAcc);
+            phaseAcc += inc;
+
+            if (i > patLen)
+                worst = juce::jmax (worst, std::abs (expected - out[(size_t) i]));
+        }
+
+        check (worst < 1e-4, "gecikme 0 iken cikis = giris",
+               juce::String ("en buyuk fark ") + juce::String (worst, 8));
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nHalf Time (yarim hiz -> bir oktav asagi)\n");
+    {
+        const auto& pr = preset ("Half Time");
+        auto t = fromPoints (pr.time, 0.0);
+        auto v = fromPoints (pr.volume, 1.0);
+
+        const auto out = run (t, v, 400.0, 3);
+
+        // uctuncu pattern'in ortasindan olc
+        const double f = estimateFrequency (out, (int) (patLen * 2.3), patLen / 4);
+
+        check (f > 180.0 && f < 220.0, "400 Hz girisi ~200 Hz'e dusuyor",
+               juce::String ("olculen ") + juce::String (f, 1) + " Hz");
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nQuarter Time (ceyrek hiz -> iki oktav asagi)\n");
+    {
+        const auto& pr = preset ("Quarter Time");
+        auto t = fromPoints (pr.time, 0.0);
+        auto v = fromPoints (pr.volume, 1.0);
+
+        const auto out = run (t, v, 400.0, 3);
+        const double f = estimateFrequency (out, (int) (patLen * 2.3), patLen / 4);
+
+        check (f > 85.0 && f < 115.0, "400 Hz girisi ~100 Hz'e dusuyor",
+               juce::String ("olculen ") + juce::String (f, 1) + " Hz");
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nStutter / Repeat (perde korunmali)\n");
+    {
+        const auto& pr = preset ("Repeat 1/8");
+        auto t = fromPoints (pr.time, 0.0);
+        auto v = fromPoints (pr.volume, 1.0);
+
+        const auto out = run (t, v, 400.0, 3);
+
+        // tekrarlanan dilimde perde degismemeli - sadece kaynak konumu degisir
+        const double f = estimateFrequency (out, (int) (patLen * 2.3), patLen / 8);
+
+        check (f > 380.0 && f < 420.0, "tekrar sirasinda perde 400 Hz kaliyor",
+               juce::String ("olculen ") + juce::String (f, 1) + " Hz");
+
+        const float jump = maxJump (out, patLen * 2, patLen);
+        check (jump < 0.35f, "basamak gecislerinde klik yok",
+               juce::String ("en buyuk sicrama ") + juce::String (jump, 4));
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nFreeze (dilim loop'u: DC degil, perde korunmali)\n");
+    {
+        const auto& pr = preset ("Freeze 2nd Half");
+        auto t = fromPoints (pr.time, 0.0);
+        auto v = fromPoints (pr.volume, 1.0);
+
+        const auto out = run (t, v, 400.0, 3);
+
+        // pattern'in ikinci yarisi: dondurulmus bolge
+        const int start = (int) (patLen * 2.6);
+        const double f = estimateFrequency (out, start, patLen / 16);
+        const double r = rms (out, start, patLen / 16);
+
+        check (f > 380.0 && f < 420.0, "freeze sirasinda perde 400 Hz kaliyor",
+               juce::String ("olculen ") + juce::String (f, 1) + " Hz");
+        check (r > 0.5, "freeze DC'ye dusmuyor, ses devam ediyor",
+               juce::String ("rms ") + juce::String (r, 4));
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nReverse gercekten geri sariyor mu\n");
+    {
+        // Her adimda frekansi 300 -> 600 Hz tirmanan bir chirp veriyoruz.
+        // Ses tersine akiyorsa cikista ayni adim 600 -> 300 olarak duyulmali.
+        const auto& pr = preset ("Reverse 1/4");
+        auto t = fromPoints (pr.time, 0.0);
+        auto v = fromPoints (pr.volume, 1.0);
+
+        GrossEngine engine;
+        engine.prepare (kSampleRate, 1);
+        engine.setPatternLengthSamples (patternLenSamples);
+        engine.setPhase (0.0);
+
+        const int stepSamples = patLen / 8;          // Reverse 1/4 -> 8 adim
+        const int total = patLen * 3;
+
+        std::vector<float> out;
+        out.reserve ((size_t) total + (size_t) kBlockSize);
+
+        juce::AudioBuffer<float> block (1, kBlockSize);
+        double acc = 0.0;
+        int written = 0;
+
+        while (written < total)
+        {
+            auto* d = block.getWritePointer (0);
+
+            for (int i = 0; i < kBlockSize; ++i)
+            {
+                const double posInStep = (double) ((written + i) % stepSamples) / stepSamples;
+                const double freq = 300.0 + 300.0 * posInStep;
+
+                d[i] = (float) std::sin (acc);
+                acc += juce::MathConstants<double>::twoPi * freq / kSampleRate;
+            }
+
+            engine.processBlock (block, t, v, true, true, 1.0f);
+
+            for (int i = 0; i < kBlockSize; ++i)
+                out.push_back (d[i]);
+
+            written += kBlockSize;
+        }
+
+        // ucuncu pattern'in ikinci adimi: bastaki ve sondaki frekansi karsilastir
+        const int stepStart = patLen * 2 + stepSamples;
+        const int quarter   = stepSamples / 4;
+
+        const double early = estimateFrequency (out, stepStart + quarter / 2, quarter);
+        const double late  = estimateFrequency (out, stepStart + stepSamples - quarter - quarter / 2, quarter);
+
+        check (early > late + 100.0,
+               "adim basi tiz, adim sonu pes (ses tersine akiyor)",
+               juce::String ("bas ") + juce::String (early, 0)
+                 + " Hz  ->  son " + juce::String (late, 0) + " Hz");
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nGate (volume zarfi)\n");
+    {
+        const auto& pr = preset ("Gate 1/8");
+        auto t = fromPoints (pr.time, 0.0);
+        auto v = fromPoints (pr.volume, 1.0);
+
+        const auto out = run (t, v, 400.0, 2);
+
+        const int step = patLen / 16;
+        const double openRms   = rms (out, patLen + (int) (step * 0.3), step / 3);
+        const double closedRms = rms (out, patLen + step + (int) (step * 0.3), step / 3);
+
+        check (openRms > 0.5,    "acik adimda ses var",
+               juce::String ("rms ") + juce::String (openRms, 4));
+        check (closedRms < 0.01, "kapali adimda ses yok",
+               juce::String ("rms ") + juce::String (closedRms, 6));
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nSidechain pump\n");
+    {
+        const auto& pr = preset ("Sidechain 1/4");
+        auto t = fromPoints (pr.time, 0.0);
+        auto v = fromPoints (pr.volume, 1.0);
+
+        const auto out = run (t, v, 400.0, 2);
+
+        const int beat = patLen / 8;
+        const double atBeat  = rms (out, patLen + 8, beat / 16);          // vurusun hemen basi
+        const double atEnd   = rms (out, patLen + beat - beat / 8, beat / 16);
+
+        check (atBeat < atEnd * 0.5, "vurus basinda ses kisiliyor, sonra geri geliyor",
+               juce::String ("bas ") + juce::String (atBeat, 4)
+                 + "  son " + juce::String (atEnd, 4));
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nOrnekleme frekansindan bagimsizlik\n");
+    {
+        const auto& pr = preset ("Half Time");
+        auto t = fromPoints (pr.time, 0.0);
+        auto v = fromPoints (pr.volume, 1.0);
+
+        for (const double sr : { 44100.0, 48000.0, 88200.0, 96000.0 })
+        {
+            RunConfig cfg; cfg.sampleRate = sr;
+            const int len = (int) cfg.patternLength();
+
+            const auto out = run (t, v, 400.0, 3, cfg);
+            const double f = estimateFrequency (out, (int) (len * 2.3), len / 4, sr);
+
+            check (f > 190.0 && f < 210.0,
+                   juce::String ((int) sr) + " Hz'de half time dogru",
+                   juce::String ("olculen ") + juce::String (f, 1) + " Hz");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nTempodan bagimsizlik (stutter perdeyi bozmamali)\n");
+    {
+        const auto& pr = preset ("Repeat 1/8");
+        auto t = fromPoints (pr.time, 0.0);
+        auto v = fromPoints (pr.volume, 1.0);
+
+        for (const double bpm : { 70.0, 90.0, 128.0, 174.0 })
+        {
+            RunConfig cfg; cfg.bpm = bpm;
+            const int len = (int) cfg.patternLength();
+
+            const auto out = run (t, v, 400.0, 3, cfg);
+            const double f = estimateFrequency (out, (int) (len * 2.3), len / 8);
+
+            check (f > 385.0 && f < 415.0,
+                   juce::String (bpm, 0) + " BPM'de perde korunuyor",
+                   juce::String ("olculen ") + juce::String (f, 1) + " Hz");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nBlok boyutundan bagimsizlik (ornegi ornegine ayni cikis)\n");
+    {
+        const auto& pr = preset ("Stutter + Gate");
+        auto t = fromPoints (pr.time, 0.0);
+        auto v = fromPoints (pr.volume, 1.0);
+
+        RunConfig ref;  ref.blockSize = 256;
+        const auto expected = run (t, v, 400.0, 2, ref);
+
+        for (const int bs : { 32, 64, 512, 2048 })
+        {
+            RunConfig cfg; cfg.blockSize = bs;
+            const auto out = run (t, v, 400.0, 2, cfg);
+
+            const int n = juce::jmin ((int) out.size(), (int) expected.size());
+            double worst = 0.0;
+
+            for (int i = 0; i < n; ++i)
+                worst = juce::jmax (worst, (double) std::abs (out[(size_t) i] - expected[(size_t) i]));
+
+            check (worst < 1e-6,
+                   juce::String (bs) + " sample'lik blokta ayni sonuc",
+                   juce::String ("en buyuk fark ") + juce::String (worst, 9));
+        }
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\n3/4 olcu (pattern 2 bar = 6 ceyrek nota)\n");
+    {
+        const auto& pr = preset ("Gate 1/8");
+        auto t = fromPoints (pr.time, 0.0);
+        auto v = fromPoints (pr.volume, 1.0);
+
+        RunConfig cfg; cfg.beatsPerBar = 3.0;
+        const int len = (int) cfg.patternLength();
+
+        const auto out = run (t, v, 400.0, 2, cfg);
+
+        // gate 16 adima bolunur; adim uzunlugu pattern'e gore olculur
+        const int step = len / 16;
+        const double openRms   = rms (out, len + (int) (step * 0.3), step / 3);
+        const double closedRms = rms (out, len + step + (int) (step * 0.3), step / 3);
+
+        check (openRms > 0.5 && closedRms < 0.01,
+               "3/4'te gate adimlari dogru yerde",
+               juce::String ("acik ") + juce::String (openRms, 3)
+                 + "  kapali " + juce::String (closedRms, 5));
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nTempo degisimine dayaniklilik\n");
+    {
+        // Pattern uzunlugu calarken degisirse okuma kafasi patlamamali
+        const auto& pr = preset ("Half Time");
+        auto t = fromPoints (pr.time, 0.0);
+        auto v = fromPoints (pr.volume, 1.0);
+
+        GrossEngine engine;
+        engine.prepare (kSampleRate, 1);
+        engine.setPhase (0.0);
+
+        juce::AudioBuffer<float> block (1, kBlockSize);
+        double acc = 0.0;
+        const double inc = juce::MathConstants<double>::twoPi * 400.0 / kSampleRate;
+
+        float peak = 0.0f, worstJump = 0.0f, previous = 0.0f;
+        bool finite = true;
+
+        for (int b = 0; b < 900; ++b)
+        {
+            // her 100 blokta bir tempoyu degistir
+            const double bpm = 60.0 + 30.0 * (b / 100);
+            engine.setPatternLengthSamples ((8.0 * 60.0 / bpm) * kSampleRate);
+
+            auto* d = block.getWritePointer (0);
+
+            for (int i = 0; i < kBlockSize; ++i)
+            {
+                d[i] = (float) std::sin (acc);
+                acc += inc;
+            }
+
+            engine.processBlock (block, t, v, true, true, 1.0f);
+
+            for (int i = 0; i < kBlockSize; ++i)
+            {
+                const float s = d[i];
+
+                if (! std::isfinite (s)) { finite = false; break; }
+
+                peak = juce::jmax (peak, std::abs (s));
+
+                if (b > 2)
+                    worstJump = juce::jmax (worstJump, std::abs (s - previous));
+
+                previous = s;
+            }
+        }
+
+        check (finite && peak < 1.05f && worstJump < 0.5f,
+               "tempo degisirken tasma ve tik yok",
+               juce::String ("tepe ") + juce::String (peak, 3)
+                 + "  sicrama " + juce::String (worstJump, 3));
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nIslem suresi (bilgi amacli)\n");
+    {
+        // Yogun cizilmis bir zarf: 128 nokta, her iki lane'de.  60 saniyelik
+        // stereo sesi isleyip gercek zamanin kac kati hizli oldugunu olcuyoruz.
+        std::vector<EnvPoint> dense;
+
+        for (int i = 0; i < 128; ++i)
+            dense.emplace_back ((double) i / 128.0, (i % 3) * 0.1, 0.3, (i % 2) == 0);
+
+        Envelope t (0.0), v (1.0);
+        t.setPoints (dense);
+        v.setPoints (dense);
+
+        GrossEngine engine;
+        engine.prepare (kSampleRate, 2);
+        engine.setPatternLengthSamples (patternLenSamples);
+
+        juce::AudioBuffer<float> block (2, kBlockSize);
+        block.clear();
+
+        const int blocks = (int) (kSampleRate * 60.0 / kBlockSize);
+        const auto start = juce::Time::getHighResolutionTicks();
+
+        for (int b = 0; b < blocks; ++b)
+        {
+            for (int c = 0; c < 2; ++c)
+                for (int i = 0; i < kBlockSize; ++i)
+                    block.setSample (c, i, (float) ((i * 7 + b) % 100) * 0.01f - 0.5f);
+
+            engine.processBlock (block, t, v, true, true, 1.0f);
+        }
+
+        const double seconds = juce::Time::highResolutionTicksToSeconds (
+                                   juce::Time::getHighResolutionTicks() - start);
+        const double realtime = 60.0 / seconds;
+
+        check (realtime > 20.0, "128 noktali zarflarla gercek zamanin ustunde",
+               juce::String (juce::roundToInt (realtime)) + "x gercek zaman  (60 sn ses "
+                 + juce::String (juce::roundToInt (seconds * 1000.0)) + " ms'de islendi)");
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nAnahtar ve mix degisimlerinde klik\n");
+    {
+        // Her birkac blokta VOLUME acilip kapaniyor / mix 1 ile 0 arasinda gidip
+        // geliyor.  Gain veya mix'in tek sample'da sicramasi burada gorunur.
+        const auto& gate = preset ("Gate 1/8");
+        const auto& half = preset ("Half Time");
+
+        for (int scenario = 0; scenario < 2; ++scenario)
+        {
+            auto t = fromPoints (scenario == 0 ? gate.time   : half.time,   0.0);
+            auto v = fromPoints (scenario == 0 ? gate.volume : half.volume, 1.0);
+
+            GrossEngine engine;
+            engine.prepare (kSampleRate, 1);
+            engine.setPatternLengthSamples (patternLenSamples);
+            engine.setPhase (0.0);
+
+            juce::AudioBuffer<float> block (1, kBlockSize);
+            double acc = 0.0;
+            const double inc = juce::MathConstants<double>::twoPi * 437.0 / kSampleRate;
+
+            std::vector<float> out;
+
+            for (int b = 0; b < 3000; ++b)
+            {
+                auto* d = block.getWritePointer (0);
+
+                for (int i = 0; i < kBlockSize; ++i)
+                {
+                    d[i] = (float) std::sin (acc);
+                    acc += inc;
+                }
+
+                const bool flip = (b / 7) % 2 == 0;
+
+                if (scenario == 0) engine.processBlock (block, t, v, true, flip, 1.0f);
+                else               engine.processBlock (block, t, v, true, true, flip ? 1.0f : 0.0f);
+
+                for (int i = 0; i < kBlockSize; ++i)
+                    out.push_back (d[i]);
+            }
+
+            const float jump = maxJump (out, patLen, (int) out.size() - patLen);
+
+            check (jump < 0.2f,
+                   scenario == 0 ? "VOLUME anahtari tik yapmiyor" : "mix degisimi tik yapmiyor",
+                   juce::String ("en buyuk sicrama ") + juce::String (jump, 3));
+        }
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nTum fabrika pattern'lerinde saglik kontrolu (437 Hz)\n");
+    {
+        for (const auto& pr : Presets::factory())
+        {
+            auto t = fromPoints (pr.time, 0.0);
+            auto v = fromPoints (pr.volume, 1.0);
+
+            // Eskiden 300 Hz kullaniyorduk; 120 BPM'de bir 1/8'lik adim tam 75 periyot
+            // ettigi icin her gate kenari sinusun sifir gecisine denk gelip kliki
+            // gizliyordu.  437 Hz adim sinirlarina hicbir zaman hizalanmiyor.
+            const auto out = run (t, v, 437.0, 2);
+
+            bool finite = true;
+            float peak = 0.0f;
+            int   peakIndex = 0;
+
+            for (int i = 0; i < (int) out.size(); ++i)
+            {
+                const float s = out[(size_t) i];
+
+                if (! std::isfinite (s)) { finite = false; break; }
+
+                if (std::abs (s) > peak)
+                {
+                    peak = std::abs (s);
+                    peakIndex = i;
+                }
+            }
+
+            const float jump = maxJump (out, patLen, patLen);
+            const double peakPhase = std::fmod ((double) peakIndex / patternLenSamples, 1.0);
+
+            // 437 Hz sinusun dogal adimi ~0.057; en hizli pattern (Scratch 2.25x) ile ~0.13.
+            // Bunun ustu ani bir sicrama, yani duyulan bir tik.
+            check (finite && peak < 1.05f && jump < 0.2f,
+                   pr.name,
+                   juce::String ("tepe ") + juce::String (peak, 3)
+                     + " @faz " + juce::String (peakPhase, 3)
+                     + "  sicrama " + juce::String (jump, 3));
+        }
+    }
+
+    std::printf ("\n%s  (%d basarisiz)\n\n",
+                 failures == 0 ? "TUM TESTLER GECTI" : "BASARISIZ TESTLER VAR",
+                 failures);
+
+    return failures == 0 ? 0 : 1;
+}

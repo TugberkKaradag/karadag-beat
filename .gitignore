@@ -1,0 +1,8 @@
+# CMake / Visual Studio derleme ciktilari (~1 GB)
+build/
+
+# Visual Studio / VS Code yerel dosyalari
+.vs/
+.vscode/
+*.user
+*.suo
