@@ -34,16 +34,16 @@ jobs:
         run: cmake -S . -B build -A x64
 
       - name: Build tests
-        run: cmake --build build --config Release --target DspTest StateTest --parallel
+        run: cmake --build build --config Release --target DspTest StateTest --parallel | Tee-Object build-tests.log
 
       - name: DSP tests
-        run: build\DspTest_artefacts\Release\DspTest.exe
+        run: build\DspTest_artefacts\Release\DspTest.exe | Tee-Object tests-dsp.log
 
       - name: State tests
-        run: build\StateTest_artefacts\Release\StateTest.exe
+        run: build\StateTest_artefacts\Release\StateTest.exe | Tee-Object tests-state.log
 
       - name: Build plugin
-        run: cmake --build build --config Release --target KaradagBeat_VST3 KaradagBeat_Standalone --parallel
+        run: cmake --build build --config Release --target KaradagBeat_VST3 KaradagBeat_Standalone --parallel | Tee-Object build-plugin.log
 
       - name: pluginval
         shell: pwsh
@@ -69,11 +69,19 @@ jobs:
 
       - name: VST3 zip
         shell: pwsh
-        run: Compress-Archive -Path "build\KaradagBeat_artefacts\Release\VST3\Karadag Beat.vst3" -DestinationPath "KaradagBeat-${{ steps.version.outputs.value }}-VST3.zip"
+        run: Compress-Archive -Path "build\KaradagBeat_artefacts\Release\VST3\Karadag Beat.vst3" -DestinationPath "KaradagBeat-${{ steps.version.outputs.value }}-Windows-VST3.zip"
+
+      - name: Report errors
+        if: failure()
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path . -Include *.log, pluginval.txt -Recurse -ErrorAction SilentlyContinue |
+            Select-String -Pattern "error C|error LNK|: error|CMake Error|\[FAIL\]|FAILED|!!!" |
+            Select-Object -First 10 | ForEach-Object { Write-Host "::error::$($_.Line.Trim())" }
 
       - uses: actions/upload-artifact@v4
         with:
-          name: KaradagBeat-${{ steps.version.outputs.value }}
+          name: KaradagBeat-windows
           path: |
             build/installer/*.exe
             KaradagBeat-*-VST3.zip
@@ -81,17 +89,87 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: pluginval-log
+          name: pluginval-log-windows
           path: pluginval-log
           if-no-files-found: ignore
 
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: version
+        run: |
+          v=$(sed -nE 's/^project\(KaradagBeat VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)
+          echo "value=$v" >> "$GITHUB_OUTPUT"
+          echo "Version $v"
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release 2>&1 | tee configure.log
+
+      - name: Build tests
+        run: cmake --build build --target DspTest StateTest --parallel 2>&1 | tee build-tests.log
+
+      - name: DSP tests
+        run: ./build/DspTest_artefacts/Release/DspTest | tee tests-dsp.log
+
+      - name: State tests
+        run: ./build/StateTest_artefacts/Release/StateTest | tee tests-state.log
+
+      - name: Build plugin
+        run: cmake --build build --target KaradagBeat_VST3 KaradagBeat_AU KaradagBeat_Standalone --parallel 2>&1 | tee build-plugin.log
+
+      - name: Package
+        run: bash installer/macos/package.sh "${{ steps.version.outputs.value }}" 2>&1 | tee package.log
+
+      - name: Install package and validate
+        run: |
+          sudo installer -pkg "build/installer/KaradagBeat-${{ steps.version.outputs.value }}-macOS.pkg" -target / | tee install.log
+          test -d "/Library/Audio/Plug-Ins/VST3/Karadag Beat.vst3"
+          test -d "/Library/Audio/Plug-Ins/Components/Karadag Beat.component"
+          test -d "/Applications/Karadag Beat.app"
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          auval -v aumf Kbt1 Krdg | tee auval.log
+          grep -q "AU VALIDATION SUCCEEDED" auval.log
+          curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_macOS.zip
+          unzip -q pluginval.zip
+          ./pluginval.app/Contents/MacOS/pluginval --strictness-level 10 --validate-in-process --timeout-ms 600000 \
+            "/Library/Audio/Plug-Ins/VST3/Karadag Beat.vst3" | tee pluginval-vst3.log
+          ./pluginval.app/Contents/MacOS/pluginval --strictness-level 10 --validate-in-process --timeout-ms 600000 \
+            "/Library/Audio/Plug-Ins/Components/Karadag Beat.component" | tee pluginval-au.log
+
+      - name: Report errors
+        if: failure()
+        run: |
+          grep -hE "error:|CMake Error|\[FAIL\]|FAILED|!!!|FATAL|ERROR|installer:" *.log 2>/dev/null | head -10 |
+            while IFS= read -r line; do echo "::error::$line"; done || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KaradagBeat-macos
+          path: build/installer/*.pkg
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [ windows, macos ]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: KaradagBeat-*
+          path: dist
+          merge-multiple: true
+
       - name: Release
-        if: github.ref_type == 'tag'
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $v = "${{ steps.version.outputs.value }}"
-          gh release create $env:GITHUB_REF_NAME `
-            "build\installer\KaradagBeat-$v-Setup.exe" "KaradagBeat-$v-VST3.zip" `
-            --title "Karadag Beat $v" --notes-file installer\release-notes.md
+          ls -l dist
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "Karadag Beat ${GITHUB_REF_NAME#v}" --notes-file installer/release-notes.md

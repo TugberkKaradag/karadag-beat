@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(KaradagBeat VERSION 0.2.0 LANGUAGES CXX)
+if(APPLE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "")
+    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "")
+endif()
+
+project(KaradagBeat VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,6 +23,11 @@ else()
     FetchContent_MakeAvailable(JUCE)
 endif()
 
+set(KARADAG_FORMATS VST3 Standalone)
+if(APPLE)
+    list(APPEND KARADAG_FORMATS AU)
+endif()
+
 juce_add_plugin(KaradagBeat
     COMPANY_NAME            "Karadag"
     COMPANY_WEBSITE         "https://github.com/TugberkKaradag/karadag-beat"
@@ -31,8 +41,9 @@ juce_add_plugin(KaradagBeat
     COPY_PLUGIN_AFTER_BUILD FALSE
     PLUGIN_MANUFACTURER_CODE Krdg
     PLUGIN_CODE             Kbt1
-    FORMATS                 VST3 Standalone
+    FORMATS                 ${KARADAG_FORMATS}
     VST3_CATEGORIES         "Fx" "Modulation"
+    AU_MAIN_TYPE            kAudioUnitType_MusicEffect
     PRODUCT_NAME            "Karadag Beat")
 
 target_sources(KaradagBeat PRIVATE
