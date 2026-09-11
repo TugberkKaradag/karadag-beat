@@ -22,7 +22,9 @@ endif()
 
 juce_add_plugin(KaradagBeat
     COMPANY_NAME            "Karadag"
+    COMPANY_WEBSITE         "https://github.com/TugberkKaradag/karadag-beat"
     BUNDLE_ID               "com.karadag.karadagbeat"
+    ICON_BIG                "${CMAKE_CURRENT_SOURCE_DIR}/resources/icon.png"
     IS_SYNTH                FALSE
     NEEDS_MIDI_INPUT        TRUE
     NEEDS_MIDI_OUTPUT       FALSE
@@ -43,6 +45,7 @@ target_sources(KaradagBeat PRIVATE
     Source/Presets.cpp
     Source/Swing.cpp
     Source/EnvelopeEditor.cpp
+    Source/Brand.cpp
     Source/Theme.cpp)
 
 target_compile_definitions(KaradagBeat PUBLIC
@@ -137,6 +140,26 @@ target_link_libraries(EditorRender PRIVATE
     KaradagBeat
     juce::juce_audio_utils
     juce::juce_dsp
+  PUBLIC
+    juce::juce_recommended_config_flags)
+
+#===============================================================================
+# Logodan simge ve kurulum sihirbazi gorsellerini ureten yardimci
+#===============================================================================
+juce_add_console_app(BrandRender PRODUCT_NAME "BrandRender")
+
+target_sources(BrandRender PRIVATE
+    Tests/BrandRender.cpp
+    Source/Brand.cpp
+    Source/Theme.cpp)
+
+target_compile_definitions(BrandRender PUBLIC
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_STANDALONE_APPLICATION=1)
+
+target_link_libraries(BrandRender PRIVATE
+    juce::juce_gui_basics
   PUBLIC
     juce::juce_recommended_config_flags)
 

@@ -26,7 +26,8 @@ if (-not (Test-Path $cmake)) {
 
 if ($Configure -or -not (Test-Path "$root\build\CMakeCache.txt")) {
     Write-Host "`n== Yapilandiriliyor ==" -ForegroundColor Cyan
-    & $cmake -S $root -B "$root\build" -G "Visual Studio 18 2026" -A x64
+    # Uretici belirtilmiyor: CMake kurulu en yeni Visual Studio'yu secer
+    & $cmake -S $root -B "$root\build" -A x64
     if ($LASTEXITCODE -ne 0) { throw "CMake yapilandirmasi basarisiz." }
 }
 

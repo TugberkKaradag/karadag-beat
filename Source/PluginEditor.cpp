@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "Brand.h"
 #include "Theme.h"
 
 namespace
@@ -999,30 +1000,9 @@ void KaradagBeatEditor::drawSignature (juce::Graphics& g, juce::Rectangle<int> a
 {
     auto r = area.toFloat();
 
-    // Glif: once bir basamak, sonra bir egri - eklentinin iki karakteri.
-    auto box = r.removeFromLeft (28.0f).withSizeKeepingCentre (24.0f, 20.0f);
-
-    const float x = box.getX(), y = box.getY();
-    const float w = box.getWidth(), h = box.getHeight();
-
-    juce::Path mark;
-    mark.startNewSubPath (x,             y + h * 0.70f);
-    mark.lineTo          (x + w * 0.22f, y + h * 0.70f);
-    mark.lineTo          (x + w * 0.22f, y + h * 0.26f);
-    mark.lineTo          (x + w * 0.46f, y + h * 0.26f);
-    mark.lineTo          (x + w * 0.46f, y + h * 0.90f);
-    mark.lineTo          (x + w * 0.62f, y + h * 0.90f);
-    mark.quadraticTo     (x + w,         y + h * 0.90f,
-                          x + w,         y + h * 0.08f);
-
-    g.setColour (th().timeAccent);
-    g.strokePath (mark, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved,
-                                              juce::PathStrokeType::rounded));
-
-    // Egrinin tepesinde ses zarfinin rengiyle bir nokta - iki lane bir arada
-    g.setColour (th().volumeAccent);
-    g.fillEllipse (juce::Rectangle<float> (4.5f, 4.5f)
-                     .withCentre ({ x + w, y + h * 0.08f }));
+    // Glif: once bir basamak, sonra bir egri; tepesinde volume renginde bir nokta
+    const auto box = r.removeFromLeft (28.0f).withSizeKeepingCentre (24.0f, 20.0f);
+    Brand::drawGlyph (g, box, 2.0f, th().timeAccent, th().volumeAccent, 4.5f);
 
     // Wordmark
     r.removeFromLeft (9.0f);

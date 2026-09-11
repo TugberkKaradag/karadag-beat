@@ -73,6 +73,9 @@ public:
     void resized() override;
 
 private:
+    // Tests/EditorRender.cpp: ekran disi goruntu alirken zamanlayiciyi elle ilerletir
+    friend struct EditorSnapshot;
+
     /** Uc zarfin da o anki hali - geri alma yigininda tutulan birim. */
     struct EnvelopeSnapshot
     {

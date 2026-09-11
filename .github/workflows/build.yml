@@ -1,12 +1,17 @@
 # Her push'ta: derle, testleri calistir, pluginval ile dogrula, kurulum dosyasi uret.
-# Ciktilar (VST3 zip'i ve Setup.exe) calismanin "Artifacts" bolumunden indirilebilir.
+# "v" ile baslayan bir etiket push'lanirsa (ornegin v0.2.0) ayrica GitHub Release
+# olusturulur ve Setup.exe ile VST3 zip'i ona eklenir.
 name: build
 
 on:
   push:
     branches: [ main ]
+    tags: [ "v*" ]
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: write      # yalnizca Release olusturmak icin
 
 jobs:
   windows:
@@ -22,6 +27,9 @@ jobs:
         run: |
           $m = Select-String -Path CMakeLists.txt -Pattern 'project\(KaradagBeat VERSION ([0-9.]+)'
           $v = $m.Matches[0].Groups[1].Value
+          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$v") {
+            throw "Etiket $env:GITHUB_REF_NAME, CMakeLists.txt'teki surumle (v$v) ayni degil"
+          }
           "value=$v" >> $env:GITHUB_OUTPUT
           Write-Host "Surum $v"
 
@@ -57,11 +65,13 @@ jobs:
           Get-Content pluginval-log\pluginval.txt
           if ($p.ExitCode -ne 0) { throw "pluginval basarisiz (cikis kodu $($p.ExitCode))" }
 
+      # Yerelde kullanilanla ayni Inno Setup surumu (PNG gorseller ve koyu tema 6.5+ ister)
       - name: Kurulum dosyasi
         shell: pwsh
         run: |
-          choco install innosetup --no-progress -y
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=${{ steps.version.outputs.value }}" installer\KaradagBeat.iss
+          Invoke-WebRequest https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe -OutFile innosetup.exe
+          Start-Process .\innosetup.exe -Wait -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/SP-"
+          & "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" "/DAppVersion=${{ steps.version.outputs.value }}" installer\KaradagBeat.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup basarisiz" }
 
       - name: VST3 zip
@@ -81,3 +91,14 @@ jobs:
           name: pluginval-log
           path: pluginval-log
           if-no-files-found: ignore
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ steps.version.outputs.value }}"
+          gh release create $env:GITHUB_REF_NAME `
+            "build\installer\KaradagBeat-$v-Setup.exe" "KaradagBeat-$v-VST3.zip" `
+            --title "Karadag Beat $v" --notes-file installer\release-notes.md
