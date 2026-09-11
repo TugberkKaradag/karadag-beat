@@ -9,7 +9,6 @@ namespace
                                          : (amount > Swing::kMax ? Swing::kMax : amount);
     }
 
-    /** Sarmali (0..1 disina tasabilen) konum icin patternToReal. */
     double patternToRealWrapped (double u, int cells, double amount) noexcept
     {
         const double whole = std::floor (u);
@@ -31,11 +30,10 @@ double Swing::patternToReal (double u, int cells, double amount) noexcept
     const double pair = 2.0 / (double) cells;
     const double k    = std::floor (u / pair);
 
-    // Tamamlanmamis son cift (ornegin 7/16 olcude tek kalan 1/16) duz kalir
     if ((k + 1.0) * pair > 1.0 + 1.0e-12)
         return u;
 
-    const double f = (u - k * pair) / pair;     // cift icindeki konum, 0..1
+    const double f = (u - k * pair) / pair;
     const double r = f < 0.5 ? (f / 0.5) * a
                              : a + ((f - 0.5) / 0.5) * (1.0 - a);
 
@@ -76,8 +74,6 @@ void Swing::apply (const std::vector<EnvPoint>& src, std::vector<EnvPoint>& dst,
 
         if (isTimeLane)
         {
-            // Gecikme y, x aninda (x - y) konumunun okundugu anlamina geliyor.
-            // O kaynak konumu da ayni swing ile kaydirilir; aradaki fark yeni gecikme.
             const double sourceReal = patternToRealWrapped (x - p.y, cells, amount);
             const double yReal = xReal - sourceReal;
             p.y = yReal < 0.0 ? 0.0 : (yReal > 1.0 ? 1.0 : yReal);

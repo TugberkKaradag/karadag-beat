@@ -4,7 +4,6 @@
 
 namespace
 {
-    // Tum renkler Theme.h'den geliyor; bu dosyada sabit renk yok.
     inline const Theme& th()  { return Themes::current(); }
 
     const char* const kHintText =
@@ -13,7 +12,6 @@ namespace
 
     const char* const kVolumeLabel = "VOLUME   gate, sidechain, pump";
 
-    /** Pattern dosyalarinin varsayilan klasoru. */
     juce::File patternFolder()
     {
         auto dir = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
@@ -22,7 +20,6 @@ namespace
         return dir;
     }
 
-    /** Time paneli basligi - pattern uzunluguna gore degisir. */
     juce::String timeLabelText (int bars)
     {
         return "TIME   top: live   bottom: " + juce::String (bars)
@@ -45,7 +42,6 @@ namespace
         label.setJustificationType (just);
     }
 
-    /** Zincir adimi secicisi: id 1 = cizim, id 2.. = slotlar. */
     constexpr int kDrawingItemId = 1;
 
     void fillSlotChoices (juce::ComboBox& box, const KaradagBeatProcessor& processor)
@@ -64,7 +60,6 @@ namespace
     }
 }
 
-//==============================================================================
 BeatLookAndFeel::BeatLookAndFeel()
 {
     refreshFromTheme();
@@ -144,7 +139,6 @@ void BeatLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& b
     g.drawText (button.getButtonText(), bounds, juce::Justification::centred);
 }
 
-//==============================================================================
 ThemeButton::ThemeButton()  : juce::Button ("theme")
 {
     setTooltip ("Colour theme");
@@ -173,7 +167,6 @@ void ThemeButton::paintButton (juce::Graphics& g, bool shouldDrawHighlighted, bo
     g.fillEllipse (juce::Rectangle<float> (r, r).withCentre ({ c.x + 5.2f, c.y }));
 }
 
-//==============================================================================
 ChainPanel::ChainPanel (KaradagBeatProcessor& p)  : processor (p)
 {
     styleLabel (title, "PATTERN CHAIN   one step per pattern loop", 10.5f, th().timeAccent.withAlpha (0.85f));
@@ -238,7 +231,6 @@ void ChainPanel::refreshEnabledSteps()
 
 void ChainPanel::timerCallback()
 {
-    // Calan adim vurgulansin
     const int active = processor.getActiveChainStep();
 
     if (active != lastActiveStep)
@@ -288,7 +280,6 @@ void ChainPanel::resized()
     }
 }
 
-//==============================================================================
 KaradagBeatEditor::KaradagBeatEditor (KaradagBeatProcessor& p)
     : AudioProcessorEditor (&p),
       processor (p),
@@ -298,7 +289,6 @@ KaradagBeatEditor::KaradagBeatEditor (KaradagBeatProcessor& p)
 {
     setLookAndFeel (&lookAndFeel);
 
-    // --- zarf editorleri ve lane basliklari ---
     timeEditor.setShowRuler (true);
 
     setupLane (timeLane, timeEditor, p.getEditableTimeEnvelope(), "TIME",
@@ -321,9 +311,6 @@ KaradagBeatEditor::KaradagBeatEditor (KaradagBeatProcessor& p)
     addAndMakeVisible (filterResoSlider);
     addAndMakeVisible (filterResoLabel);
 
-    // --- pattern slotu secici ---
-    // Baslik ve ayiricilarin ID'si 0; ComboBox indeksleri yalnizca gercek ogeleri
-    // saydigi icin parametre baglantisi (indeks = slot) bozulmuyor.
     {
         const auto names = Presets::slotNames();
 
@@ -339,9 +326,6 @@ KaradagBeatEditor::KaradagBeatEditor (KaradagBeatProcessor& p)
     }
     refreshSlotNames();
 
-    // Baglanti onChange'den ONCE kurulmali: kurulurken kutuyu parametreye esitler
-    // ve bunu bildirimle yapar.  onChange o sirada bagli olsaydi pencere her
-    // acildiginda secili slot editore yuklenir, kaydedilmemis cizim silinirdi.
     presetAttach = std::make_unique<APVTS::ComboBoxAttachment> (processor.apvts, "preset", presetBox);
 
     presetBox.onChange = [this]
@@ -350,20 +334,16 @@ KaradagBeatEditor::KaradagBeatEditor (KaradagBeatProcessor& p)
 
         if (index >= 0)
         {
-            pushUndoStep();          // slot yuklenmeden onceki cizim geri alinabilsin
+            pushUndoStep();
             processor.loadSlotIntoEditor (index);
             refreshAllEditors();
         }
     };
     addAndMakeVisible (presetBox);
 
-    // --- kullanici slotuna kaydet ---
     saveButton.onClick = [this] { promptSaveToSlot(); };
     addAndMakeVisible (saveButton);
 
-    // --- geri al / ileri al ---
-    // Klavye kisayoluna guvenemiyoruz: host (ozellikle FL) Ctrl+Z'yi kendi
-    // geri almasi icin yakalayabiliyor.  Gorunur dugmeler her yerde calisir.
     for (auto* b : { &undoButton, &redoButton })
         addAndMakeVisible (b);
 
@@ -385,7 +365,6 @@ KaradagBeatEditor::KaradagBeatEditor (KaradagBeatProcessor& p)
     redoButton.onClick = [this] { redo(); };
     updateUndoButtons();
 
-    // --- snap secici ---
     snapBox.addItem ("1/4",   1);
     snapBox.addItem ("1/8",   2);
     snapBox.addItem ("1/16",  3);
@@ -396,7 +375,6 @@ KaradagBeatEditor::KaradagBeatEditor (KaradagBeatProcessor& p)
     snapBox.onChange = [this] { refreshGrid(); };
     addAndMakeVisible (snapBox);
 
-    // --- pattern uzunlugu ---
     barsBox.addItemList ({ "1 bar", "2 bars", "4 bars" }, 1);
     barsBox.setTooltip ("Pattern length  -  the whole grid spans this many bars");
     barsBox.onChange = [this] { refreshGrid(); };
@@ -406,7 +384,6 @@ KaradagBeatEditor::KaradagBeatEditor (KaradagBeatProcessor& p)
     addAndMakeVisible (mixSlider);
     addAndMakeVisible (mixLabel);
 
-    // --- alt bar: MIDI, zincir, swing ---
     midiToggle  .setTooltip ("Trigger patterns from notes, starting at C4");
     latchToggle .setTooltip ("Latch: a note switches its pattern on until the same note is played again");
     retrigToggle.setTooltip ("Retrigger: every note restarts its pattern from the beginning  -  "
@@ -428,7 +405,6 @@ KaradagBeatEditor::KaradagBeatEditor (KaradagBeatProcessor& p)
     hintLabel.setInterceptsMouseClicks (false, false);
     addAndMakeVisible (hintLabel);
 
-    // --- parametre baglantilari ---
     barsAttach       = std::make_unique<APVTS::ComboBoxAttachment> (processor.apvts, "patternBars", barsBox);
     filterTypeAttach = std::make_unique<APVTS::ComboBoxAttachment> (processor.apvts, "filterType", filterTypeBox);
 
@@ -498,7 +474,6 @@ void KaradagBeatEditor::setupLane (LaneControls& lane, EnvelopeEditor& editor, E
     addAndMakeVisible (lane.draw);
 }
 
-//==============================================================================
 namespace
 {
     bool samePoints (const std::vector<EnvPoint>& a, const std::vector<EnvPoint>& b)
@@ -543,8 +518,6 @@ void KaradagBeatEditor::pushUndoStep()
 {
     auto snapshot = captureSnapshot();
 
-    // Ayni durumu iki kez ust uste yigmayalim - tekerlek gibi hizli
-    // tekrarlanan olaylar yigini gereksizce doldurmasin
     if (! undoStack.empty()
         && samePoints (undoStack.back().time,   snapshot.time)
         && samePoints (undoStack.back().volume, snapshot.volume)
@@ -615,7 +588,7 @@ bool KaradagBeatEditor::keyPressed (const juce::KeyPress& key)
 void KaradagBeatEditor::refreshGrid()
 {
     static const int bars[]      = { 1, 2, 4 };
-    static const int perBar[]    = { 4, 8, 16, 32, 12, 24 };   // 1/4 1/8 1/16 1/32 1/8T 1/16T
+    static const int perBar[]    = { 4, 8, 16, 32, 12, 24 };
 
     const int barCount  = bars[juce::jlimit (0, 2, barsBox.getSelectedItemIndex())];
     const int divisions = barCount * perBar[juce::jlimit (0, 5, snapBox.getSelectedId() - 1)];
@@ -730,7 +703,6 @@ void KaradagBeatEditor::exportPatternFile()
 
             file = file.withFileExtension (ext);
 
-            // Dosyaya verilen ad pattern'in adi olsun - karsi taraf onu gorecek
             if (! processor.exportPattern (file, file.getFileNameWithoutExtension()))
                 juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
                                                         "Export failed",
@@ -765,7 +737,6 @@ void KaradagBeatEditor::importPatternFile()
             }
             else
             {
-                // basarisiz yukleme geri alma yiginina bos bir adim birakmasin
                 if (! undoStack.empty())
                     undoStack.pop_back();
 
@@ -811,7 +782,6 @@ void KaradagBeatEditor::showThemeMenu()
         });
 }
 
-//==============================================================================
 void KaradagBeatEditor::refreshSlotNames()
 {
     for (int i = 0; i < Presets::kNumSlots; ++i)
@@ -827,16 +797,13 @@ int KaradagBeatEditor::chooseTargetSlot() const
 {
     const int selected = presetBox.getSelectedItemIndex();
 
-    // Secili slot zaten kullaniciya aitse uzerine yaz
     if (Presets::isUserSlot (selected))
         return selected;
 
-    // Degilse ilk bos kullanici slotunu bul
     for (int i = Presets::numPresets(); i < Presets::kNumSlots; ++i)
         if (! processor.isSlotFilled (i))
             return i;
 
-    // Hepsi doluysa ilk kullanici slotuna dus
     return Presets::numPresets();
 }
 
@@ -854,8 +821,6 @@ void KaradagBeatEditor::promptSaveToSlot()
 
     window->addTextEditor ("name", suggested, {});
 
-    // Hedef slot da secilebilsin - boylece bir pattern'i baska bir slota
-    // kopyalamak icin yukleyip farkli slota kaydetmek yeterli
     juce::StringArray slotOptions;
 
     for (int i = Presets::numPresets(); i < Presets::kNumSlots; ++i)
@@ -886,9 +851,6 @@ void KaradagBeatEditor::promptSaveToSlot()
             if (auto* box = window->getComboBoxComponent ("slot"))
                 slot += juce::jmax (0, box->getSelectedItemIndex());
 
-            // Kendi slotunu yukleyip ayni yere geri kaydetmek bilincli bir hareket;
-            // yalnizca BASKA bir dolu slotun uzerine yazarken sor - kaydedilmis bir
-            // pattern'in uzerine yazmak geri alinamiyor.
             const bool overwritesOther = processor.isSlotFilled (slot)
                                       && slot != presetBox.getSelectedItemIndex();
 
@@ -898,10 +860,6 @@ void KaradagBeatEditor::promptSaveToSlot()
                 return;
             }
 
-            // Hazir mesaj kutusu ilk dugmeye Enter kisayolunu bagliyor.  Kaydet
-            // penceresinde de Enter = Save oldugu icin iki kez Enter'a basmak
-            // farkinda olmadan bir pattern'in uzerine yazardi.  Burada yikici
-            // dugmenin kisayolu yok; Escape vazgecer.
             auto* confirm = new juce::AlertWindow ("Overwrite pattern?",
                                                    "Slot " + juce::String (slot + 1) + " already holds \""
                                                      + processor.getSlotName (slot) + "\".\n"
@@ -934,11 +892,8 @@ void KaradagBeatEditor::commitSave (int slot, const juce::String& name)
     }
 }
 
-//==============================================================================
 void KaradagBeatEditor::timerCallback()
 {
-    // Dalga formu gercek zamanda tutuluyor; editor ise duz (pattern) izgarada
-    // ciziyor.  Swing varken her ekran dilimi, calindigi gercek dilimden okunur.
     const int bins = KaradagBeatProcessor::waveformBins;
 
     for (int i = 0; i < bins; ++i)
@@ -962,8 +917,6 @@ void KaradagBeatEditor::timerCallback()
     if (filterLane.label.getText() != filterText)
         filterLane.label.setText (filterText, juce::dontSendNotification);
 
-    // MIDI ile pattern degistiyse gorseli takip ettir; nota birakilinca
-    // kullanicinin cizimi aynen geri gelir
     const int midiPreset = processor.getMidiPreset();
 
     if (midiPreset != lastSeenMidiPreset)
@@ -975,14 +928,11 @@ void KaradagBeatEditor::timerCallback()
 
         refreshAllEditors();
 
-        // Hangi slotun MIDI ile tetiklendigi gorunsun - piano roll'dan
-        // calarken secili slot ile calan slot farkli olabiliyor
         midiToggle.setButtonText (midiPreset >= 0
                                     ? "MIDI " + juce::String (midiPreset + 1)
                                     : juce::String ("MIDI"));
     }
 
-    // Zincirde calan adim
     const int chainStep = processor.getActiveChainStep();
 
     if (chainStep != lastSeenChainStep)
@@ -995,16 +945,13 @@ void KaradagBeatEditor::timerCallback()
     }
 }
 
-//==============================================================================
 void KaradagBeatEditor::drawSignature (juce::Graphics& g, juce::Rectangle<int> area) const
 {
     auto r = area.toFloat();
 
-    // Glif: once bir basamak, sonra bir egri; tepesinde volume renginde bir nokta
     const auto box = r.removeFromLeft (28.0f).withSizeKeepingCentre (24.0f, 20.0f);
     Brand::drawGlyph (g, box, 2.0f, th().timeAccent, th().volumeAccent, 4.5f);
 
-    // Wordmark
     r.removeFromLeft (9.0f);
 
     auto upper = r.removeFromTop (r.getHeight() * 0.52f);
@@ -1021,13 +968,11 @@ void KaradagBeatEditor::paint (juce::Graphics& g)
 {
     g.fillAll (th().background);
 
-    // ust bar
     g.setColour (th().panel);
     g.fillRect (0, 0, getWidth(), 56);
     g.setColour (th().edge);
     g.drawHorizontalLine (56, 0.0f, (float) getWidth());
 
-    // alt bar
     const int barTop = getHeight() - 20 - 36;
     g.setColour (th().panel);
     g.fillRect (0, barTop, getWidth(), 36);
@@ -1071,9 +1016,8 @@ void KaradagBeatEditor::resized()
 {
     auto area = getLocalBounds();
 
-    // --- ust bar ---
     auto top = area.removeFromTop (56).reduced (10, 6);
-    top.removeFromLeft (152);   // imza alani (paint icinde ciziliyor)
+    top.removeFromLeft (152);
 
     top.removeFromLeft (6);
     presetBox.setBounds (top.removeFromLeft (220).withSizeKeepingCentre (220, 26));
@@ -1095,7 +1039,6 @@ void KaradagBeatEditor::resized()
     top.removeFromLeft (5);
     barsBox.setBounds (top.removeFromLeft (84).withSizeKeepingCentre (84, 26));
 
-    // sagdan sola: mix, tema
     auto mixArea = top.removeFromRight (62);
     mixLabel .setBounds (mixArea.removeFromBottom (10));
     mixSlider.setBounds (mixArea);
@@ -1103,10 +1046,8 @@ void KaradagBeatEditor::resized()
     top.removeFromRight (8);
     themeButton.setBounds (top.removeFromRight (40).withSizeKeepingCentre (40, 26));
 
-    // --- alt ipucu satiri ---
     hintLabel.setBounds (area.removeFromBottom (20).reduced (12, 0));
 
-    // --- alt bar: MIDI, zincir, swing ---
     {
         auto bar = area.removeFromBottom (36).reduced (10, 5);
 
@@ -1125,7 +1066,6 @@ void KaradagBeatEditor::resized()
         swingLabel .setBounds (bar.removeFromRight (50));
     }
 
-    // --- uc zarf paneli: time biraz daha genis (cetvel onun ustunde) ---
     area = area.reduced (10, 8);
     const int total = area.getHeight();
 

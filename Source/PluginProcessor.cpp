@@ -6,7 +6,6 @@ namespace
 {
     constexpr int kMaxEnvPoints = 256;
 
-    /** Bir slotun lane'ini zarfa kopyalar; bos lane varsayilan duz degerine doner. */
     void copyLane (const std::vector<EnvPoint>& src, Envelope& dst, double fallback)
     {
         if (src.empty()) dst.clearTo (fallback);
@@ -19,7 +18,6 @@ namespace
     }
 }
 
-//==============================================================================
 juce::AudioProcessorValueTreeState::ParameterLayout KaradagBeatProcessor::createParameterLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
@@ -42,7 +40,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout KaradagBeatProcessor::create
                     juce::ParameterID { "mix", 1 }, "Mix",
                     juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f));
 
-    // Yumusatma sureleri.  Kisa degerlerde ince ayar olsun diye egik aralik.
     layout.add (std::make_unique<juce::AudioParameterFloat> (
                     juce::ParameterID { "timeSmooth", 1 }, "Time Smooth",
                     juce::NormalisableRange<float> (1.0f, 80.0f, 0.1f, 0.4f), 4.0f,
@@ -59,7 +56,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout KaradagBeatProcessor::create
     layout.add (std::make_unique<juce::AudioParameterBool> (
                     juce::ParameterID { "midiLatch", 1 }, "MIDI Latch", false));
 
-    // --- 0.2: filtre lane'i, retrigger, swing, zincir ---
     layout.add (std::make_unique<juce::AudioParameterBool> (
                     juce::ParameterID { "filterOn", 1 }, "Filter", true));
 
@@ -90,7 +86,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout KaradagBeatProcessor::create
     return layout;
 }
 
-//==============================================================================
 KaradagBeatProcessor::KaradagBeatProcessor()
     : AudioProcessor (BusesProperties()
                         .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
@@ -117,7 +112,6 @@ KaradagBeatProcessor::KaradagBeatProcessor()
     for (auto& s : chainSteps)
         s.store (kChainDrawing);
 
-    // ses thread'inde nota eklerken ya da zarf kopyalarken bellek ayirmasin
     heldNotes.ensureStorageAllocated (128);
     swingScratch.reserve ((size_t) kMaxEnvPoints);
 
@@ -152,14 +146,11 @@ void KaradagBeatProcessor::prepareToPlay (double sampleRate, int)
     retriggered = false;
     midiActive.store (false);
 
-    // Taban (cizim) korunur: host yeniden hazirlasa da (ornegin buffer boyu
-    // degisince) calinan pattern cizime doner, slotun kayitli haline degil.
     activeOverride = -1;
     baseChanged    = true;
     audioChanged   = true;
 }
 
-//==============================================================================
 void KaradagBeatProcessor::publishEnvelopes()
 {
     {
@@ -189,8 +180,6 @@ void KaradagBeatProcessor::loadSlotIntoEditor (int index)
     if (! juce::isPositiveAndBelow (index, Presets::kNumSlots))
         return;
 
-    // MIDI ile bir slot gosterilirken secilen preset, gosterim bitince geri
-    // gelecek cizimin yerine gecer.  Sesteki tabani parametre degisimi gunceller.
     if (editorShowsSlot.load())
     {
         const juce::SpinLock::ScopedLockType lock (slotLock);
@@ -266,7 +255,6 @@ double KaradagBeatProcessor::patternToRealPhase (double patternPhase) const noex
     return Swing::patternToReal (patternPhase, swingCellsForGui.load(), swingAmountForGui.load());
 }
 
-//==============================================================================
 int KaradagBeatProcessor::getChainStep (int step) const noexcept
 {
     if (! juce::isPositiveAndBelow (step, kMaxChainSteps))
@@ -290,7 +278,6 @@ void KaradagBeatProcessor::setChainLength (int steps) noexcept
     chainLength.store (juce::jlimit (1, kMaxChainSteps, steps));
 }
 
-//==============================================================================
 bool KaradagBeatProcessor::exportPattern (const juce::File& file, const juce::String& name) const
 {
     juce::XmlElement xml ("KaradagBeatPattern");
@@ -311,14 +298,12 @@ bool KaradagBeatProcessor::importPattern (const juce::File& file, juce::String& 
     if (xml == nullptr || ! xml->hasTagName ("KaradagBeatPattern"))
         return false;
 
-    // Once gecici zarflara oku - dosya bozuksa mevcut cizim bozulmasin
     Envelope timeEnv (0.0), volEnv (1.0), filterEnv (1.0);
 
     if (! timeEnv.fromString (xml->getStringAttribute ("time"))
         || ! volEnv.fromString (xml->getStringAttribute ("volume")))
         return false;
 
-    // Filtre 0.2'de geldi; eski dosyalarda yok, o zaman filtre acik kalir
     const auto filterText = xml->getStringAttribute ("filter");
 
     if (filterText.isNotEmpty() && ! filterEnv.fromString (filterText))
@@ -358,7 +343,6 @@ bool KaradagBeatProcessor::isSlotFilled (int index) const
     return ! slots[(size_t) index].isEmpty();
 }
 
-//==============================================================================
 juce::File KaradagBeatProcessor::getUserPatternFile()
 {
     return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
@@ -383,9 +367,6 @@ void KaradagBeatProcessor::loadUserSlotsFromDisk()
 
     for (auto* slotXml : xml->getChildWithTagNameIterator ("Slot"))
     {
-        // "user" = kacinci kullanici slotu (fabrika sayisindan bagimsiz).
-        // Fabrika pattern'i eklendiginde kullanici kayitlari kaymasin diye
-        // mutlak index yerine bunu kullaniyoruz; "index" eski dosyalar icin.
         int index = -1;
 
         if (slotXml->hasAttribute ("user"))
@@ -458,13 +439,11 @@ void KaradagBeatProcessor::saveUserSlotsToDisk() const
     xml.writeTo (file);
 }
 
-//==============================================================================
 bool KaradagBeatProcessor::beginMidiBlock()
 {
     const bool enabled = pMidiTrigger->load() > 0.5f;
     const bool latch   = pMidiLatch  ->load() > 0.5f;
 
-    // Tetikleme kapandiysa ya da mod degistiyse temiz bir baslangic yap
     if (! enabled || latch != wasLatching)
     {
         heldNotes.clear();
@@ -488,9 +467,6 @@ bool KaradagBeatProcessor::handleMidiMessage (const juce::MidiMessage& m)
 
     if (wasLatching)
     {
-        // Latch: nota bir pattern'i acar, ayni nota tekrar basilinca kapatir.
-        // Notayi birakmak hicbir sey yapmaz - uzun freeze'ler icin piano
-        // roll'a uzun nota cizmek gerekmiyor.
         if (! m.isNoteOn())
             return false;
 
@@ -519,8 +495,6 @@ bool KaradagBeatProcessor::handleMidiMessage (const juce::MidiMessage& m)
     else if (m.isNoteOff()) heldNotes.removeValue (m.getNoteNumber());
     else                    return false;
 
-    // Basili notalardan slot araligina dusen en tizi kazanir.  Aralik
-    // disindaki bir nota, altindaki gecerli notayi gizlememeli.
     int winner = -1;
     int winnerNote = -1;
 
@@ -540,8 +514,6 @@ bool KaradagBeatProcessor::handleMidiMessage (const juce::MidiMessage& m)
 
     midiActive.store (winner >= 0);
 
-    // Yeni bir pattern ancak kazanan notanin kendisi basildiginda baslar;
-    // alttaki bir notaya basmak calani yeniden baslatmamali.
     return m.isNoteOn() && winner >= 0 && m.getNoteNumber() == winnerNote;
 }
 
@@ -568,9 +540,6 @@ int KaradagBeatProcessor::resolveOverride() noexcept
 
 void KaradagBeatProcessor::updatePatternSources()
 {
-    // 1) Preset parametresi degisti: yeni taban.  Kullanicinin elle cizdigi zarf
-    //    geldikten sonra bunu tekrar uygularsak cizimi her blokta sileriz, bu
-    //    yuzden yalnizca SECIM degistiginde yuklenir.
     const int param = juce::jlimit (0, Presets::kNumSlots - 1, (int) pPreset->load());
 
     if (param != lastParamPreset)
@@ -583,10 +552,8 @@ void KaradagBeatProcessor::updatePatternSources()
             lastParamPreset = param;
             baseChanged = true;
         }
-        // kilit o an GUI'deyse yukleme bir sonraki parcaya kalir
     }
 
-    // 2) GUI'den elle duzenlenmis zarf geldi mi?
     if (hasPending.load())
     {
         const juce::SpinLock::ScopedTryLockType lock (publishLock);
@@ -602,7 +569,6 @@ void KaradagBeatProcessor::updatePatternSources()
             }
             else if (activeOverride >= 0)
             {
-                // Editor calan slotu gosteriyor: degisiklik yalnizca ona uygulanir
                 copyEnvelope (pendingTime,   audioTime);
                 copyEnvelope (pendingVolume, audioVolume);
                 copyEnvelope (pendingFilter, audioFilter);
@@ -613,7 +579,6 @@ void KaradagBeatProcessor::updatePatternSources()
         }
     }
 
-    // 3) Gecici kaynak (MIDI / zincir) degisti mi?
     const int wanted = resolveOverride();
 
     if (wanted != activeOverride)
@@ -670,7 +635,6 @@ void KaradagBeatProcessor::refreshPlayEnvelopes()
     playFilter.setPoints (swingScratch);
 }
 
-//==============================================================================
 void KaradagBeatProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -684,7 +648,6 @@ void KaradagBeatProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     if (! retrigEnabled || ! midiActive.load())
         retriggered = false;
 
-    // --- host transport'undan tempo ve konum ---
     double bpm = 120.0, ppq = 0.0;
     int tsNumerator = 4, tsDenominator = 4;
     bool playing = false, havePpq = false;
@@ -714,7 +677,6 @@ void KaradagBeatProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     bpm = juce::jlimit (20.0, 999.0, bpm);
 
-    // Pattern uzunlugu 1 / 2 / 4 bar, ceyrek nota cinsinden
     static constexpr double barChoices[] = { 1.0, 2.0, 4.0 };
     const int barIndex = juce::jlimit (0, 2, (int) pPatternBars->load());
 
@@ -727,8 +689,6 @@ void KaradagBeatProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     engine.setSmoothing (pTimeSmooth->load(), pVolSmooth->load());
     engine.setFilter (pFilterType->load() > 0.5f, pFilterReso->load(), pFilterSmooth->load());
 
-    // Host'un pattern icindeki konumu.  Retrigger ile bastan baslatilmis bir
-    // pattern, nota birakilana kadar kendi fazinda akar.
     const bool   hostSync  = playing && havePpq;
     const double hostTurns = hostSync ? ppq / patternBeats : 0.0;
 
@@ -741,7 +701,6 @@ void KaradagBeatProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             engine.setPhase (hostTurns - whole);
     }
 
-    // --- swing: pattern'deki 1/16'lik sayisi ve miktar ---
     const int    swingCells  = juce::jmax (0, (int) std::floor (patternBeats * 4.0 + 1.0e-6));
     const double swingAmount = pSwing->load() / 100.0;
 
@@ -758,9 +717,6 @@ void KaradagBeatProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     updatePatternSources();
     refreshPlayEnvelopes();
 
-    // --- blogu MIDI olaylarinin ve zincir adimlarinin dustugu noktalarda bol ---
-    // Pattern degisimi tam o sample'da gerceklessin.  Aksi halde vurusa konan
-    // bir nota pattern'i bir buffer boyu erken degistirir.
     const bool  timeOn   = pTimeOn  ->load() > 0.5f;
     const bool  volOn    = pVolOn   ->load() > 0.5f;
     const bool  filterOn = pFilterOn->load() > 0.5f;
@@ -778,8 +734,6 @@ void KaradagBeatProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         {
             int chunkEnd = end;
 
-            // Zincir: pattern turunun bittigi sample'da da bol ki yeni adim tam
-            // turun basinda baslasin
             if (chainOn)
             {
                 const double remaining = (1.0 - engine.getPhase()) * engine.getPatternLengthSamples();
@@ -824,7 +778,6 @@ void KaradagBeatProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             }
             else if (retriggered && ! midiActive.load())
             {
-                // Nota birakildi: pattern host'un o anki konumuna geri doner
                 retriggered = false;
 
                 if (hostSync)
@@ -844,7 +797,6 @@ void KaradagBeatProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     displayPhase.store (Swing::realToPattern (engine.getPhase(), appliedCells, appliedSwing));
 }
 
-//==============================================================================
 juce::AudioProcessorEditor* KaradagBeatProcessor::createEditor()
 {
     return new KaradagBeatEditor (*this);
@@ -852,8 +804,6 @@ juce::AudioProcessorEditor* KaradagBeatProcessor::createEditor()
 
 void KaradagBeatProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    // Editor o an MIDI ile calan bir slotu gosteriyorsa kaydedilecek olan
-    // kenarda bekleyen cizimdir
     const bool showing = editorShowsSlot.load();
 
     auto state = apvts.copyState();
@@ -896,7 +846,6 @@ void KaradagBeatProcessor::setStateInformation (const void* data, int sizeInByte
     if (timeText.isNotEmpty()) editTime  .fromString (timeText);
     if (volText .isNotEmpty()) editVolume.fromString (volText);
 
-    // 0.1 projelerinde filtre yok - acik baslasin
     if (filterText.isEmpty() || ! editFilter.fromString (filterText))
         editFilter.clearTo (1.0);
 
@@ -910,7 +859,6 @@ void KaradagBeatProcessor::setStateInformation (const void* data, int sizeInByte
     publishEnvelopes();
 }
 
-//==============================================================================
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new KaradagBeatProcessor();

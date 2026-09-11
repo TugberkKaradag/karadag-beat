@@ -1,20 +1,9 @@
-/*
-    Eklenti penceresini ekran disinda PNG'ye cizer - arayuz duzenini host acmadan
-    ve ekrana hicbir pencere getirmeden kontrol etmek icin.  Once kisa bir davul
-    dongusu isler ki arkadaki dalga formu ve calan kafa da gorunsun.
-
-      editor.png       varsayilan boyut (1040 x 720), README'deki ekran goruntusu
-      editor_min.png   en kucuk boyut (1000 x 600)
-      chain.png        zincir paneli
-*/
-
 #include "../Source/PluginProcessor.h"
 #include "../Source/PluginEditor.h"
 #include "../Source/Theme.h"
 
 #include <cstdio>
 
-/** KaradagBeatEditor'un friend'i: zamanlayiciyi ve paleti elle tetikler. */
 struct EditorSnapshot
 {
     static void tick (KaradagBeatEditor& e)          { e.timerCallback(); }
@@ -33,7 +22,7 @@ namespace
 
         if (stream == nullptr || ! png.writeImageToStream (image, *stream))
         {
-            std::printf ("yazilamadi: %s\n", name.toRawUTF8());
+            std::printf ("could not write: %s\n", name.toRawUTF8());
             return false;
         }
 
@@ -56,11 +45,10 @@ namespace
         }
     };
 
-    /** 120 BPM'de basit bir davul: 1 ve 3'te kick, 2 ve 4'te snare, 1/8 hi-hat. */
     float drumSample (juce::int64 n, juce::Random& noise)
     {
         const double sr = 48000.0, beat = 24000.0;
-        const double inBeat = std::fmod ((double) n, beat) / sr;             // saniye
+        const double inBeat = std::fmod ((double) n, beat) / sr;
         const int beatIndex = (int) ((double) n / beat) % 4;
 
         double s = 0.0;
@@ -90,7 +78,6 @@ int main()
     KaradagBeatProcessor proc;
     proc.prepareToPlay (48000.0, 512);
 
-    // Bir fabrika pattern'i secili, uzerine elle bir filtre egrisi cizilmis
     {
         const int preset = Presets::names().indexOf ("Stutter + Gate");
 
@@ -105,7 +92,6 @@ int main()
         proc.publishEnvelopes();
     }
 
-    // 1.37 pattern boyunca davul: dalga formu dolar, calan kafa pattern'in ortasina gelir
     {
         SteadyPlayHead head;
         proc.setPlayHead (&head);
@@ -135,7 +121,6 @@ int main()
         std::unique_ptr<juce::AudioProcessorEditor> base (proc.createEditor());
         auto& editor = dynamic_cast<KaradagBeatEditor&> (*base);
 
-        // README icin her zaman varsayilan palet, kullanicinin sectigi degil
         Themes::setCurrent (0);
         EditorSnapshot::applyTheme (editor);
         EditorSnapshot::tick (editor);
@@ -147,7 +132,6 @@ int main()
             savePng (editor.createComponentSnapshot (editor.getLocalBounds(), true, 1.0f), name);
         }
 
-        // Zincir paneli editorun bakisiyla
         ChainPanel panel (proc);
         panel.setLookAndFeel (&editor.getLookAndFeel());
         savePng (panel.createComponentSnapshot (panel.getLocalBounds(), true, 1.0f), "chain.png");

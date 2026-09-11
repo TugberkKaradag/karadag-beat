@@ -1,8 +1,6 @@
-# Kaynaklar her yerde LF kalsin (dosyalar zaten LF yaziliyor)
 * text=auto eol=lf
 
 *.png binary
 *.ico binary
 
-# Inno Setup betigi Windows araci; CRLF ile tutalim
 *.iss text eol=crlf

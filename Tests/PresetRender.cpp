@@ -1,10 +1,3 @@
-/*
-    Tum fabrika pattern'lerini tek bir kontakt sayfasi olarak PNG'ye cizer.
-    Host da DAW da gerekmez - zarf editorunu ekran disinda render eder.
-
-    Boylece her pattern'in sekli tek bakista dogrulanabilir.
-*/
-
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "../Source/Envelope.h"
 #include "../Source/Presets.h"
@@ -13,7 +6,6 @@
 
 namespace
 {
-    // Renkler secili paletten geliyor
     inline juce::Colour timeAccent()  { return Themes::current().timeAccent; }
     inline juce::Colour volAccent()   { return Themes::current().volumeAccent; }
     inline juce::Colour background()  { return Themes::current().background; }
@@ -26,7 +18,6 @@ namespace
 
     constexpr int kCellHeight = kTitleHeight + kTimeHeight + kVolHeight + kGap;
 
-    /** Bir zarf editorunu verilen boyutta ekran disinda cizer. */
     void renderEnvelope (juce::Graphics& target,
                          juce::Rectangle<int> bounds,
                          Envelope& env,
@@ -66,8 +57,6 @@ int main()
 
     juce::Image sheet (juce::Image::RGB, width, height, true);
 
-    // Graphics nesnesi kapanmadan goruntu kaydedilirse cizimler bos cikar,
-    // bu yuzden tum cizim isi kendi kapsaminda yapiliyor.
     {
     juce::Graphics g (sheet);
 
@@ -75,7 +64,7 @@ int main()
 
     g.setColour (juce::Colours::white.withAlpha (0.85f));
     g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
-    g.drawText ("KARADAG BEAT  -  fabrika pattern'leri",
+    g.drawText ("KARADAG BEAT  -  factory patterns",
                 juce::Rectangle<int> (kGap, 8, width, 22),
                 juce::Justification::centredLeft);
 
@@ -89,18 +78,16 @@ int main()
         const int x = kGap + col * kCellWidth;
         const int y = 34 + kGap + row * kCellHeight;
 
-        // baslik
         g.setColour (juce::Colours::white.withAlpha (0.75f));
         g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
         g.drawText (preset.name,
                     juce::Rectangle<int> (x, y, kCellWidth - kGap, kTitleHeight),
                     juce::Justification::centredLeft);
 
-        // ne yaptigini kisa not olarak yaz
         g.setColour (juce::Colours::white.withAlpha (0.32f));
         g.setFont (juce::FontOptions (10.0f));
-        g.drawText (juce::String (preset.time.empty()   ? "" : "zaman ")
-                      + juce::String (preset.volume.empty() ? "" : "ses"),
+        g.drawText (juce::String (preset.time.empty()   ? "" : "time ")
+                      + juce::String (preset.volume.empty() ? "" : "volume"),
                     juce::Rectangle<int> (x, y, kCellWidth - kGap - 6, kTitleHeight),
                     juce::Justification::centredRight);
 
@@ -124,11 +111,11 @@ int main()
 
     if (stream == nullptr || ! png.writeImageToStream (sheet, *stream))
     {
-        std::printf ("PNG yazilamadi\n");
+        std::printf ("could not write the PNG\n");
         return 1;
     }
 
-    std::printf ("%d pattern cizildi -> %s  (%d x %d)\n",
+    std::printf ("%d patterns drawn -> %s  (%d x %d)\n",
                  count, outFile.getFullPathName().toRawUTF8(), width, height);
     return 0;
 }

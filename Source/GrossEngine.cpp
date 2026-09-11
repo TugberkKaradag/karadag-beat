@@ -7,7 +7,7 @@ namespace
 {
     constexpr int kTaps   = GrossEngine::kSincTaps;
     constexpr int kBands  = GrossEngine::kSincBands;
-    constexpr int kPhases = 1024;       // kesirli konum cozunurlugu (aralar dogrusal)
+    constexpr int kPhases = 1024;
     constexpr int kBandStride = (kPhases + 1) * kTaps;
 
     double besselI0 (double x)
@@ -27,16 +27,6 @@ namespace
         return sum;
     }
 
-    /** Kaiser pencereli sinc cekirdekleri: [bant][kesirli konum][nokta].
-        Her satirin toplami 1'e normalize - DC kazanci konumdan bagimsiz kalsin.
-
-        Bant 0'da kesim tam Nyquist: tam sample konumunda cekirdek saf bir darbe
-        olur, boylece kesirli ve tam konumlar ayni frekans cevabini paylasir ve
-        normal hizda calma bit-bit seffaf kalir.
-
-        Bant b > 0 okuma hizi v = 1 + b/4 icin: kesim Nyquist / v.  Okuma kafasi v
-        kat hizli ilerlediginde giristeki f frekansi cikista v*f olur; Nyquist'i
-        asacak olanlar burada, girdi tarafinda suzuluyor. */
     const std::vector<float>& buildSincTable()
     {
         static const std::vector<float> table = []
@@ -60,7 +50,6 @@ namespace
 
                     for (int k = 0; k < kTaps; ++k)
                     {
-                        // k. nokta, okuma konumunun tabanina gore -(T/2-1) ... T/2 ofsetinde
                         const double x  = (double) (k - (kTaps / 2 - 1)) - frac;
                         const double cx = cutoff * x;
                         const double sinc = std::abs (cx) < 1.0e-12 ? 1.0 : std::sin (pi * cx) / (pi * cx);
@@ -88,14 +77,13 @@ void GrossEngine::prepare (double sampleRate, int channels)
     sr          = sampleRate;
     numChannels = juce::jlimit (1, 8, channels);
 
-    // Pattern 4 bar'a kadar cikabiliyor; 40 BPM 4/4'te 4 bar = 24 sn.
     ringLength = (int) (sampleRate * 24.0) + 8;
     ring.setSize (numChannels, ringLength, false, true, true);
 
-    fadeLength    = juce::jmax (16, (int) (sampleRate * 0.004));   // ~4 ms
-    jumpThreshold = juce::jmax (8.0, sampleRate * 0.001);          // ~1 ms
-    gainStep      = 1.0 / juce::jmax (1.0, sampleRate * 0.002);    // tam salinim 2 ms
-    filterStep    = 1.0 / juce::jmax (1.0, sampleRate * 0.005);    // tam acma/kapama 5 ms
+    fadeLength    = juce::jmax (16, (int) (sampleRate * 0.004));
+    jumpThreshold = juce::jmax (8.0, sampleRate * 0.001);
+    gainStep      = 1.0 / juce::jmax (1.0, sampleRate * 0.002);
+    filterStep    = 1.0 / juce::jmax (1.0, sampleRate * 0.005);
 
     smoothedMix.reset (sampleRate, 0.02);
 
@@ -141,13 +129,11 @@ void GrossEngine::setSmoothing (double timeMs, double volumeMs) noexcept
     fadeLength = juce::jmax (16, (int) (sr * juce::jlimit (0.5, 200.0, timeMs) * 0.001));
     gainStep   = 1.0 / juce::jmax (1.0, sr * juce::jlimit (0.5, 200.0, volumeMs) * 0.001);
 
-    // Suren bir capraz gecis yeni uzunluktan uzun kalmasin
     fadeCounter = juce::jmin (fadeCounter, fadeLength);
 }
 
 void GrossEngine::setFilter (bool highPass, double resonance, double smoothMs) noexcept
 {
-    // Q 0.707 (duz) ... ~8.5 (belirgin tepe)
     const double q = 0.7071 * std::pow (12.0, juce::jlimit (0.0, 1.0, resonance));
     const double k = 1.0 / q;
 
@@ -155,7 +141,7 @@ void GrossEngine::setFilter (bool highPass, double resonance, double smoothMs) n
     {
         filterHighPass = highPass;
         filterK        = k;
-        coefClosed     = -1.0;      // katsayilar bir sonraki sample'da yenilensin
+        coefClosed     = -1.0;
     }
 
     filterStep = 1.0 / juce::jmax (1.0, sr * juce::jlimit (0.5, 200.0, smoothMs) * 0.001);
@@ -197,7 +183,6 @@ float GrossEngine::readHermite (int channel, double position) const noexcept
     const double y2 = data[i2];
     const double y3 = data[i3];
 
-    // Catmull-Rom / 4 noktali Hermite
     const double c0 = y1;
     const double c1 = 0.5 * (y2 - y0);
     const double c2 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
@@ -244,9 +229,6 @@ float GrossEngine::readSample (int channel, double position, int band) const noe
 {
     const double floored = std::floor (position);
 
-    // Tam sample konumu ve normal hiz: interpolasyon yok, bypass bit-bit seffaf.
-    // Hizli okurken tam konumlar da suzulmeli - yoksa 2x gibi tam sayi hizlarda
-    // tum sample'lar bu yoldan gecip hic anti-alias uygulanmazdi.
     if (band == 0 && position == floored)
     {
         int i = (int) std::fmod (floored, (double) ringLength);
@@ -254,10 +236,6 @@ float GrossEngine::readSample (int channel, double position, int band) const noe
         return ring.getReadPointer (channel)[i];
     }
 
-    // Sinc cekirdegi okuma noktasindan T/2 sample ileriye bakar.  Yazma kafasina
-    // o kadar yakin degilsek sinc, cok yakinsak (gecikme sifirdan yeni kalkiyorsa)
-    // yalnizca 2 sample ileriye bakan Hermite'e dus.  Bu bolge birkac sample
-    // surer ve ikisi de ayni sesi yakinsadigi icin gecis duyulmaz.
     double dist = (double) writePos - position;
     if (dist < 0.0) dist += (double) ringLength;
 
@@ -272,7 +250,6 @@ void GrossEngine::processBlock (juce::AudioBuffer<float>& buffer,
                                 bool  volEnabled,
                                 float mix) noexcept
 {
-    // Filtre kapali: zarfi hic okunmaz, openFilter yalnizca yer tutucu
     processBlock (buffer, timeEnv, volEnv, openFilter, timeEnabled, volEnabled, false, mix);
 }
 
@@ -307,7 +284,6 @@ void GrossEngine::processBlock (juce::AudioBuffer<float>& buffer,
 
     for (int i = 0; i < numSamples; ++i)
     {
-        // 1) canli girisi halka buffer'a yaz, dalga formu icin tepe degerini topla
         float inputPeak = 0.0f;
 
         for (int c = 0; c < channels; ++c)
@@ -329,7 +305,6 @@ void GrossEngine::processBlock (juce::AudioBuffer<float>& buffer,
 
         wavePeak = juce::jmax (wavePeak, inputPeak);
 
-        // 2) zarflari bu faz noktasinda degerlendir
         const double timeVal    = timeEnabled ? timeEnv.valueAt (phase, timeSegment) : 0.0;
         const double targetGain = volEnabled  ? volEnv .valueAt (phase, volSegment)  : 1.0;
 
@@ -339,15 +314,11 @@ void GrossEngine::processBlock (juce::AudioBuffer<float>& buffer,
         const double wet  = smoothedMix.getNextValue();
         const double dry  = 1.0 - wet;
 
-        // Filtre: kapali lane'e gecilince de rampayla acilir.  Tamamen acik ve
-        // lane kapaliyken filtre hic calismaz ve durumu sifirlanir.
         const double targetClosed = filterEnabled ? 1.0 - filterEnv.valueAt (phase, filterSegment) : 0.0;
         filterClosed += juce::jlimit (-filterStep, filterStep, targetClosed - filterClosed);
 
         const bool runFilter = filterEnabled || filterClosed > 0.0;
 
-        // Tam acikken filtre cikisi hic karismaz (bypass bit-bit seffaf); acilmanin
-        // ilk %3'unde filtreye yumusakca gecilir ki 20 kHz'lik kesim bile tik yapmasin.
         double filterBlend = 0.0;
 
         if (runFilter)
@@ -365,14 +336,6 @@ void GrossEngine::processBlock (juce::AudioBuffer<float>& buffer,
             coefClosed = -1.0;
         }
 
-        // 3) kesirli okuma konumu
-        //
-        // Hermite 4 nokta kullanir ve okuma noktasindan 2 sample ILERIYE bakar.
-        // Gecikme tam 0 iken frac de 0 olur, egri dogrudan yazilan sample'i verir
-        // ve bypass bit-bit seffaf kalir.  Ama gecikme 0 ile 2 sample arasinda ve
-        // kesirli oldugunda, ileri bakan noktalar halka buffer'da henuz
-        // uzerine yazilmamis (bir tur onceki) sesi gosterir - bozulma ve tasma.
-        // Bu dar araligi atlayarak her iki durumu da dogru tutuyoruz.
         double delaySamples = timeVal * patternLen;
 
         if (delaySamples > 0.0 && delaySamples < 2.0)
@@ -380,7 +343,6 @@ void GrossEngine::processBlock (juce::AudioBuffer<float>& buffer,
 
         const double readPos = (double) writePos - delaySamples;
 
-        // 4) zarfta ani sicrama var mi? varsa crossfade baslat
         if (havePrevRead)
         {
             const double expected = prevReadPos + 1.0;
@@ -391,13 +353,11 @@ void GrossEngine::processBlock (juce::AudioBuffer<float>& buffer,
 
             if (std::abs (diff) > jumpThreshold)
             {
-                fadeReadPos = expected;      // eski kafa yoluna devam etsin
+                fadeReadPos = expected;
                 fadeCounter = fadeLength;
             }
             else
             {
-                // Okuma hizi = kafanin bu sample'da ilerledigi miktar.  Sicramalar
-                // haric tutuluyor; ~1 ms'lik yumusatma kesim frekansinin titremesini onluyor.
                 readSpeed += 0.02 * (std::abs (1.0 + diff) - readSpeed);
             }
         }
@@ -405,13 +365,10 @@ void GrossEngine::processBlock (juce::AudioBuffer<float>& buffer,
         const int band = juce::jlimit (0, kSincBands - 1,
                                        (int) std::lround ((readSpeed - 1.0) * 4.0));
 
-        // 5) oku, gerekiyorsa iki kafayi dogrusal crossfade ile birlestir
         double gOld = 0.0, gNew = 1.0;
 
         if (fadeCounter > 0)
         {
-            // Dogrusal gecis: iki kafa ayni sesi tasidiginda esit-guclu
-            // egri +3 dB tasma yapardi, boyle tepe degeri hep <= 1 kalir.
             gNew = 1.0 - ((double) fadeCounter / (double) fadeLength);
             gOld = 1.0 - gNew;
         }

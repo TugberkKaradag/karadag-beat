@@ -1,11 +1,3 @@
-/*
-    Proje kaydetme / acma dogrulamasi.
-
-    FL'de en can sikici hata sinifi sudur: projeyi kaydedip tekrar acinca cizdigin
-    pattern kaybolur.  Bu test host olmadan ayni yolu izler:
-    durumu yaz, yeni bir ornege yukle, her seyin ayni gelip gelmedigine bak.
-*/
-
 #include "../Source/PluginProcessor.h"
 #include "../Source/Swing.h"
 
@@ -19,7 +11,7 @@ namespace
     void check (bool condition, const juce::String& what, const juce::String& detail = {})
     {
         std::printf ("  [%s] %-46s %s\n",
-                     condition ? "GECTI" : "KALDI",
+                     condition ? "PASS" : "FAIL",
                      what.toRawUTF8(),
                      detail.toRawUTF8());
 
@@ -45,7 +37,6 @@ namespace
         return true;
     }
 
-    /** Host transport'u taklidi: tempo, konum, caliyor mu. */
     struct FakePlayHead  : juce::AudioPlayHead
     {
         double bpm = 120.0;
@@ -63,8 +54,6 @@ namespace
         }
     };
 
-    /** Sabit (DC) girisle blok blok calistirir; notalar mutlak sample konumunda.
-        Playhead verilmisse her blokta ilerletilir. */
     std::vector<float> runDC (KaradagBeatProcessor& proc, int totalSamples, int blockSize,
                               std::vector<std::pair<int, juce::MidiMessage>> events = {},
                               FakePlayHead* playHead = nullptr, double sampleRate = 48000.0)
@@ -109,10 +98,9 @@ int main()
 {
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::printf ("\nKaradag Beat - proje durumu testleri\n\n");
+    std::printf ("\nKaradag Beat - project state tests\n\n");
 
-    // ------------------------------------------------------------------
-    std::printf ("Elle cizilmis zarf kaydedilip geri yukleniyor\n");
+    std::printf ("A hand-drawn envelope is saved and restored\n");
 
     juce::MemoryBlock savedState;
     std::vector<EnvPoint> originalTime, originalVolume;
@@ -121,7 +109,6 @@ int main()
         KaradagBeatProcessor source;
         source.prepareToPlay (48000.0, 512);
 
-        // Fabrika pattern'lerinin hicbirine benzemeyen bir zarf ciz
         auto& timeEnv = source.getEditableTimeEnvelope();
         timeEnv.clearTo (0.0);
         timeEnv.addPoint (0.125, 0.375, 0.42, false);
@@ -135,7 +122,6 @@ int main()
 
         source.publishEnvelopes();
 
-        // parametreleri de varsayilandan uzaklastir
         source.apvts.getParameter ("mix")   ->setValueNotifyingHost (0.42f);
         source.apvts.getParameter ("timeOn")->setValueNotifyingHost (0.0f);
 
@@ -145,8 +131,8 @@ int main()
         source.getStateInformation (savedState);
     }
 
-    check (savedState.getSize() > 0, "durum yazildi",
-           juce::String ((int) savedState.getSize()) + " bayt");
+    check (savedState.getSize() > 0, "state written",
+           juce::String ((int) savedState.getSize()) + " bytes");
 
     {
         KaradagBeatProcessor restored;
@@ -154,31 +140,27 @@ int main()
         restored.setStateInformation (savedState.getData(), (int) savedState.getSize());
 
         check (samePoints (restored.getEditableTimeEnvelope().getPoints(), originalTime),
-               "time zarfi aynen geri geldi",
-               juce::String ((int) restored.getEditableTimeEnvelope().getNumPoints()) + " nokta");
+               "time envelope restored exactly",
+               juce::String ((int) restored.getEditableTimeEnvelope().getNumPoints()) + " points");
 
         check (samePoints (restored.getEditableVolumeEnvelope().getPoints(), originalVolume),
-               "volume zarfi aynen geri geldi",
-               juce::String ((int) restored.getEditableVolumeEnvelope().getNumPoints()) + " nokta");
+               "volume envelope restored exactly",
+               juce::String ((int) restored.getEditableVolumeEnvelope().getNumPoints()) + " points");
 
         const float mix = restored.apvts.getParameter ("mix")->getValue();
-        check (std::abs (mix - 0.42f) < 1.0e-3f, "mix degeri korundu",
+        check (std::abs (mix - 0.42f) < 1.0e-3f, "mix value kept",
                juce::String (mix, 3));
 
         const float timeOn = restored.apvts.getParameter ("timeOn")->getValue();
-        check (timeOn < 0.5f, "time anahtari korundu");
+        check (timeOn < 0.5f, "time switch kept");
     }
 
-    // ------------------------------------------------------------------
-    std::printf ("\nGeri yuklenen zarf gercekten sese uygulaniyor\n");
+    std::printf ("\nThe restored envelope is really applied to the audio\n");
     {
-        // Durumu yukledikten sonra ses islenince cizilen zarfin
-        // preset tarafindan ezilmedigini dogrula
         KaradagBeatProcessor restored;
         restored.prepareToPlay (48000.0, 512);
         restored.setStateInformation (savedState.getData(), (int) savedState.getSize());
 
-        // time kapali kaydedilmisti, geri acalim ki etkisi duyulsun
         restored.apvts.getParameter ("timeOn")->setValueNotifyingHost (1.0f);
 
         juce::AudioBuffer<float> buffer (2, 512);
@@ -199,7 +181,7 @@ int main()
         }
 
         check (samePoints (restored.getEditableTimeEnvelope().getPoints(), originalTime),
-               "200 blok ses sonrasi zarf hala yerinde");
+               "envelope still in place after 200 blocks of audio");
 
         bool finite = true;
         float peak = 0.0f;
@@ -215,19 +197,18 @@ int main()
                 peak = juce::jmax (peak, std::abs (s));
             }
 
-        check (finite && peak <= 1.05f, "cikis saglikli",
-               juce::String ("tepe ") + juce::String (peak, 3));
+        check (finite && peak <= 1.05f, "output is healthy",
+               juce::String ("peak ") + juce::String (peak, 3));
     }
 
-    // ------------------------------------------------------------------
-    std::printf ("\nBos / bozuk durum eklentiyi cokertmiyor\n");
+    std::printf ("\nEmpty / broken state doesn\'t crash the plugin\n");
     {
         KaradagBeatProcessor p;
         p.prepareToPlay (48000.0, 512);
 
         p.setStateInformation (nullptr, 0);
 
-        const char junk[] = "bu gecerli bir durum blogu degil";
+        const char junk[] = "this is not a valid state block";
         p.setStateInformation (junk, (int) sizeof (junk));
 
         juce::AudioBuffer<float> buffer (2, 512);
@@ -235,18 +216,15 @@ int main()
         juce::MidiBuffer midi;
         p.processBlock (buffer, midi);
 
-        check (true, "bozuk durum guvenle yok sayildi");
+        check (true, "broken state safely ignored");
     }
 
-    // ------------------------------------------------------------------
-    std::printf ("\nPattern uzunlugu 1 / 2 / 4 bar\n");
+    std::printf ("\nPattern length 1 / 2 / 4 bars\n");
     {
-        // Gate 1/8 pattern'i her uzunlukta 16 adima bolunur.  Pattern uzadikca
-        // adimlar da uzar, yani ayni surede daha az kapanma duyulmali.
         const int gateIndex = Presets::names().indexOf ("Gate 1/8");
         jassert (gateIndex >= 0);
 
-        const int expected[] = { 16, 8, 4 };   // 4 saniyede kapanma sayisi
+        const int expected[] = { 16, 8, 4 };
 
         for (int choice = 0; choice < 3; ++choice)
         {
@@ -259,9 +237,6 @@ int main()
             presetParam->setValueNotifyingHost (presetParam->convertTo0to1 ((float) gateIndex));
             barsParam  ->setValueNotifyingHost (barsParam  ->convertTo0to1 ((float) choice));
 
-            // Sabit (DC) giris: time zarfi duz oldugu icin cikis dogrudan
-            // gain degerini verir.  Sinus kullansaydik kendi sifir gecislerini
-            // gate kapanmasi sanardik.
             juce::AudioBuffer<float> buffer (1, 512);
             juce::MidiBuffer midi;
 
@@ -292,13 +267,12 @@ int main()
             const int want = expected[choice];
             const bool ok = closings >= want - 1 && closings <= want + 1;
 
-            check (ok, juce::String (barCount[choice]) + " bar'da gate periyodu dogru",
-                   juce::String (closings) + " kapanma, beklenen ~" + juce::String (want));
+            check (ok, juce::String (barCount[choice]) + "-bar gate period is right",
+                   juce::String (closings) + " closings, expected ~" + juce::String (want));
         }
     }
 
-    // ------------------------------------------------------------------
-    std::printf ("\nMIDI tetikleme: basili tut ve latch\n");
+    std::printf ("\nMIDI triggering: hold and latch\n");
     {
         auto send = [] (KaradagBeatProcessor& proc, const juce::MidiMessage& m)
         {
@@ -312,7 +286,6 @@ int main()
         const int slot = 5;
         const int note = 60 + slot;
 
-        // --- basili tut (varsayilan) ---
         KaradagBeatProcessor held;
         held.prepareToPlay (48000.0, 256);
 
@@ -321,15 +294,14 @@ int main()
         send (held, juce::MidiMessage::noteOff (1, note));
         const bool offOnRelease = held.getMidiPreset() == -1;
 
-        check (onWhileHeld && offOnRelease, "basili tut: nota birakilinca pattern kapaniyor");
+        check (onWhileHeld && offOnRelease, "hold: releasing the note stops the pattern");
 
         send (held, juce::MidiMessage::noteOn (1, note, 0.8f));
-        send (held, juce::MidiMessage::noteOn (1, 127, 0.8f));      // slot araliginin disi
+        send (held, juce::MidiMessage::noteOn (1, 127, 0.8f));
 
-        check (held.getMidiPreset() == slot, "aralik disi tiz nota gecerli notayi gizlemiyor",
-               "calan slot " + juce::String (held.getMidiPreset()));
+        check (held.getMidiPreset() == slot, "an out-of-range high note doesn't hide a valid one",
+               "playing slot " + juce::String (held.getMidiPreset()));
 
-        // --- latch ---
         KaradagBeatProcessor latch;
         latch.prepareToPlay (48000.0, 256);
         latch.apvts.getParameter ("midiLatch")->setValueNotifyingHost (1.0f);
@@ -346,16 +318,12 @@ int main()
         send (latch, juce::MidiMessage::noteOn (1, note + 1, 0.8f));
         const bool closed = latch.getMidiPreset() == -1;
 
-        check (opened && staysOpen, "latch: nota birakilsa da pattern acik kaliyor");
-        check (switched && closed,  "latch: baska nota degistiriyor, ayni nota kapatiyor");
+        check (opened && staysOpen, "latch: pattern stays on after the note is released");
+        check (switched && closed,  "latch: another note switches, the same note stops");
     }
 
-    // ------------------------------------------------------------------
-    std::printf ("\nMIDI olayi blok icinde tam yerinde uygulaniyor\n");
+    std::printf ("\nA MIDI event is applied exactly where it falls in the block\n");
     {
-        // Sabit (DC) giris, secili pattern Off: cikis = 1.0.  Blogun 300. sample'inda
-        // Sidechain 1/4 notasi geliyor; pump pattern'in basi sifira yakin oldugu icin
-        // degisim cikista hemen gorunur.  Notadan onceki 300 sample'a dokunulmamali.
         const int slot = Presets::names().indexOf ("Sidechain 1/4");
         jassert (slot >= 0);
 
@@ -385,25 +353,22 @@ int main()
         const float after = buffer.getSample (0, 480);
 
         check (worstBefore < 1.0e-6f && after < 0.6f,
-               "nota oncesi dokunulmadan, nota sonrasi pattern devrede",
-               "nota oncesi en buyuk sapma " + juce::String (worstBefore, 4)
+               "untouched before the note, pattern active after it",
+               "largest deviation before the note " + juce::String (worstBefore, 4)
                  + ", 480. sample " + juce::String (after, 3));
 
-        // Bir sonraki blogun 200. sample'inda nota birakiliyor: o ana kadar pump
-        // devam etmeli, sonra (2 ms'lik rampayla) tekrar tam sese donmeli.
         runBlock (juce::MidiMessage::noteOff (1, 60 + slot), 200);
 
         const float stillPumping = buffer.getSample (0, 190);
         const float released     = buffer.getSample (0, 500);
 
         check (stillPumping < 0.9f && released > 0.99f,
-               "nota birakildigi sample'da pattern kapaniyor",
+               "pattern stops on the sample the note is released",
                "190. sample " + juce::String (stillPumping, 3)
                  + ", 500. sample " + juce::String (released, 3));
     }
 
-    // ------------------------------------------------------------------
-    std::printf ("\nPattern disa / ice aktarma\n");
+    std::printf ("\nPattern export / import\n");
     {
         const auto file = juce::File::getSpecialLocation (juce::File::tempDirectory)
                             .getChildFile ("karadag_beat_test.kbeat");
@@ -425,9 +390,9 @@ int main()
         f.addPoint (0.5, 0.2, 0.4, false);
 
         auto* bars = src.apvts.getParameter ("patternBars");
-        bars->setValueNotifyingHost (bars->convertTo0to1 (2.0f));     // 4 bar
+        bars->setValueNotifyingHost (bars->convertTo0to1 (2.0f));
 
-        const bool written = src.exportPattern (file, "Test Deseni");
+        const bool written = src.exportPattern (file, "Test Pattern");
 
         KaradagBeatProcessor dst;
         dst.prepareToPlay (48000.0, 512);
@@ -439,57 +404,52 @@ int main()
                  && samePoints (dst.getEditableTimeEnvelope().getPoints(),   t.getPoints())
                  && samePoints (dst.getEditableVolumeEnvelope().getPoints(), v.getPoints())
                  && samePoints (dst.getEditableFilterEnvelope().getPoints(), f.getPoints()),
-               "uc zarf da dosya uzerinden aynen tasiniyor");
+               "all three envelopes survive the file round trip");
 
-        check (name == "Test Deseni" && dst.getPatternBars() == 4,
-               "ad ve pattern uzunlugu da tasiniyor",
+        check (name == "Test Pattern" && dst.getPatternBars() == 4,
+               "name and pattern length survive too",
                "'" + name + "', " + juce::String (dst.getPatternBars()) + " bar");
 
-        // bozuk dosya: reddedilmeli ve mevcut cizim bozulmamali
         const auto before = dst.getEditableTimeEnvelope().getPoints();
-        file.replaceWithText ("<KaradagBeatPattern time=\"cop\" volume=\"\"/>");
+        file.replaceWithText ("<KaradagBeatPattern time=\"junk\" volume=\"\"/>");
 
         const bool rejected = ! dst.importPattern (file, name);
 
         check (rejected && samePoints (dst.getEditableTimeEnvelope().getPoints(), before),
-               "bozuk dosya reddediliyor, cizim korunuyor");
+               "broken file rejected, drawing kept");
 
         file.deleteFile();
     }
 
-    // ------------------------------------------------------------------
-    std::printf ("\nCizim MIDI notasindan ve yeniden hazirlanmadan sonra geri geliyor\n");
+    std::printf ("\nThe drawing comes back after a MIDI note and after re-preparing\n");
     {
         KaradagBeatProcessor proc;
         proc.prepareToPlay (48000.0, 512);
 
-        // Cizim: sabit %25 ses.  Secili preset "Off" (tam ses) - farki duyulur.
         proc.getEditableVolumeEnvelope().clearTo (0.25);
         proc.publishEnvelopes();
 
         const auto drawn = runDC (proc, 2048, 512);
         const auto during = runDC (proc, 2048, 512,
-                                   { { 0, juce::MidiMessage::noteOn (1, 60, 0.8f) } });   // C4 = "Off"
+                                   { { 0, juce::MidiMessage::noteOn (1, 60, 0.8f) } });
         const auto after = runDC (proc, 2048, 512,
                                   { { 0, juce::MidiMessage::noteOff (1, 60) } });
 
         check (std::abs (drawn.back() - 0.25f) < 1.0e-4f && std::abs (during.back() - 1.0f) < 1.0e-4f
                  && std::abs (after.back() - 0.25f) < 1.0e-4f,
-               "nota birakilinca cizim geri geliyor",
+               "drawing comes back when the note is released",
                juce::String (drawn.back(), 3) + " -> " + juce::String (during.back(), 3)
                  + " -> " + juce::String (after.back(), 3));
 
-        // Host buffer boyunu degistirince prepareToPlay yeniden cagrilir
         proc.prepareToPlay (48000.0, 256);
         const auto reprepared = runDC (proc, 1024, 256);
 
         check (std::abs (reprepared.back() - 0.25f) < 1.0e-4f,
-               "yeniden hazirlama cizimi silmiyor",
+               "re-preparing doesn't wipe the drawing",
                juce::String (reprepared.back(), 3));
     }
 
-    // ------------------------------------------------------------------
-    std::printf ("\nMIDI slotu editorde gosterilirken cizim bekliyor\n");
+    std::printf ("\nThe drawing waits while a MIDI slot is shown in the editor\n");
     {
         const int gate = Presets::names().indexOf ("Gate 1/8");
 
@@ -507,7 +467,6 @@ int main()
         const bool shows = proc.isEditorShowingSlot()
                              && samePoints (vol.getPoints(), Presets::factory()[(size_t) gate].volume);
 
-        // Gosterim sirasinda kaydedilen proje cizimi tasimali, gosterilen slotu degil
         juce::MemoryBlock state;
         proc.getStateInformation (state);
 
@@ -516,18 +475,15 @@ int main()
 
         proc.restoreDrawingInEditor();
 
-        check (shows, "editor calan slotu gosteriyor");
+        check (shows, "editor shows the playing slot");
         check (samePoints (reopened.getEditableVolumeEnvelope().getPoints(), drawing),
-               "gosterim sirasinda kaydedilen proje cizimi tasiyor");
+               "a project saved during the display keeps the drawing");
         check (! proc.isEditorShowingSlot() && samePoints (vol.getPoints(), drawing),
-               "gosterim bitince cizim aynen geri geliyor");
+               "drawing comes back unchanged when the display ends");
     }
 
-    // ------------------------------------------------------------------
-    std::printf ("\nEklenti penceresi acilinca cizim yerinde kaliyor\n");
+    std::printf ("\nThe drawing stays put when the plugin window opens\n");
     {
-        // Kullanici bir slot secip ustune kendi cizimini yapti, pencereyi kapatti
-        // ve tekrar acti.  Pencere acilirken slot editore yeniden yuklenmemeli.
         KaradagBeatProcessor proc;
         proc.prepareToPlay (48000.0, 512);
         setParam (proc, "preset", (float) Presets::names().indexOf ("Gate 1/8"));
@@ -546,12 +502,11 @@ int main()
         const auto out = runDC (proc, 2048, 512);
 
         check (samePoints (vol.getPoints(), drawing) && std::abs (out.back() - 0.4f) < 1.0e-4f,
-               "pencere acilinca slot cizimi ezmiyor",
-               "cikis " + juce::String (out.back(), 3));
+               "opening the window doesn't overwrite the drawing with the slot",
+               "output " + juce::String (out.back(), 3));
     }
 
-    // ------------------------------------------------------------------
-    std::printf ("\nRetrigger: nota pattern'i bastan baslatiyor\n");
+    std::printf ("\nRetrigger: a note restarts the pattern\n");
     {
         const int pump = Presets::names().indexOf ("Sidechain 1/4");
         const int noteAt = 100;
@@ -567,7 +522,6 @@ int main()
                           { { noteAt, juce::MidiMessage::noteOn (1, 60 + pump, 0.8f) } }, &head);
         };
 
-        // Host iki farkli yerde; retrigger ile ikisi de notada bastan baslamali
         KaradagBeatProcessor retrig, other, plain;
         FakePlayHead head, otherHead, plainHead;
 
@@ -583,7 +537,6 @@ int main()
             plainDiff = juce::jmax (plainDiff, std::abs (out[(size_t) i] - plainOut[(size_t) i]));
         }
 
-        // Pattern'in basindan calindigini zarfin kendisiyle dogrula
         Envelope pumpEnv (1.0);
         pumpEnv.setPoints (Presets::factory()[(size_t) pump].volume);
 
@@ -591,33 +544,31 @@ int main()
         const double expected = pumpEnv.valueAt (k / 192000.0);
         const double shapeError = std::abs (out[(size_t) (noteAt + k)] - expected);
 
-        check (diff < 1.0e-6f, "retrigger: host konumundan bagimsiz",
-               "iki konum arasi en buyuk fark " + juce::String (diff, 7));
-        check (shapeError < 0.01, "retrigger: pattern notanin sample'inda bastan",
-               "notadan 3000 sample sonra " + juce::String (out[(size_t) (noteAt + k)], 3)
-                 + ", zarf " + juce::String (expected, 3));
-        check (plainDiff > 0.1f, "retrigger kapaliyken host konumu korunuyor",
-               "fark " + juce::String (plainDiff, 3));
+        check (diff < 1.0e-6f, "retrigger: independent of the host position",
+               "largest difference between the two positions " + juce::String (diff, 7));
+        check (shapeError < 0.01, "retrigger: pattern starts over on the note's sample",
+               "3000 samples after the note " + juce::String (out[(size_t) (noteAt + k)], 3)
+                 + ", envelope " + juce::String (expected, 3));
+        check (plainDiff > 0.1f, "without retrigger the host position is kept",
+               "difference " + juce::String (plainDiff, 3));
 
-        // Nota birakilinca faz host'a geri doner
         runDC (retrig, 512, 512, { { 50, juce::MidiMessage::noteOff (1, 60 + pump) } }, &head);
 
-        const double patternBeats = 8.0;      // 2 bar 4/4
+        const double patternBeats = 8.0;
         const double hostPhase = std::fmod (head.ppq / patternBeats, 1.0);
         const double shown = retrig.getPlayheadPhase();
 
-        check (std::abs (shown - hostPhase) < 1.0e-6, "nota birakilinca host fazina donuyor",
-               "faz " + juce::String (shown, 6) + ", host " + juce::String (hostPhase, 6));
+        check (std::abs (shown - hostPhase) < 1.0e-6, "returns to the host phase when the note is released",
+               "phase " + juce::String (shown, 6) + ", host " + juce::String (hostPhase, 6));
     }
 
-    // ------------------------------------------------------------------
-    std::printf ("\nSlot zinciri\n");
+    std::printf ("\nSlot chain\n");
     {
         const int pump = Presets::names().indexOf ("Sidechain 1/4");
 
         KaradagBeatProcessor proc;
         proc.prepareToPlay (48000.0, 512);
-        setParam (proc, "patternBars", 0.0f);         // 1 bar = 96000 sample
+        setParam (proc, "patternBars", 0.0f);
         setParam (proc, "chainOn", 1.0f);
 
         proc.setChainLength (3);
@@ -638,21 +589,17 @@ int main()
             return m;
         };
 
-        // 96000, 512'nin kati degil: tur siniri bir blogun ortasina dusuyor
-        check (minOver (0, len) > 0.9999f, "1. adim: cizim (tam ses)");
-        // Pump turun basinda sifirdan baslar; gain 2 ms'lik slew ile iner.
-        // Tur siniri kayan noktali fazdan bulundugu icin en fazla 1 sample kayabilir.
+        check (minOver (0, len) > 0.9999f, "step 1: drawing (full volume)");
         check (std::abs (out[(size_t) len - 1] - 1.0f) < 1.0e-6f && out[(size_t) len + 1] < 0.995f,
-               "2. adim tam tur sinirinda basliyor",
-               "sinirdan once " + juce::String (out[(size_t) len - 1], 4)
-                 + ", 1 sample sonra " + juce::String (out[(size_t) len + 1], 4));
-        check (minOver (len, 2 * len) < 0.5f, "2. adim: sidechain pump",
-               "en dusuk " + juce::String (minOver (len, 2 * len), 3));
-        check (minOver (2 * len + 200, 3 * len) > 0.9999f, "3. adim: yine cizim");
-        check (proc.getActiveChainStep() == 0, "zincir basa sariyor",
-               "adim " + juce::String (proc.getActiveChainStep() + 1));
+               "step 2 starts exactly at the loop boundary",
+               "before the boundary " + juce::String (out[(size_t) len - 1], 4)
+                 + ", 1 sample later " + juce::String (out[(size_t) len + 1], 4));
+        check (minOver (len, 2 * len) < 0.5f, "step 2: sidechain pump",
+               "lowest " + juce::String (minOver (len, 2 * len), 3));
+        check (minOver (2 * len + 200, 3 * len) > 0.9999f, "step 3: drawing again");
+        check (proc.getActiveChainStep() == 0, "chain wraps around",
+               "step " + juce::String (proc.getActiveChainStep() + 1));
 
-        // Zincir proje ile birlikte kaydedilip aciliyor
         juce::MemoryBlock state;
         proc.getStateInformation (state);
 
@@ -661,29 +608,27 @@ int main()
 
         check (reopened.getChainLength() == 3 && reopened.getChainStep (1) == pump
                  && reopened.getChainStep (0) == KaradagBeatProcessor::kChainDrawing,
-               "zincir projeyle kaydediliyor");
+               "chain is saved with the project");
 
-        // Transport durukken de zincir kendi turlarini sayar
         KaradagBeatProcessor freeRun;
         freeRun.prepareToPlay (48000.0, 512);
         setParam (freeRun, "chainOn", 1.0f);
         freeRun.setChainLength (2);
 
-        runDC (freeRun, (int) (192000 * 1.5), 512);      // 2 bar @ 120 BPM = 192000 sample
+        runDC (freeRun, (int) (192000 * 1.5), 512);
 
-        check (freeRun.getActiveChainStep() == 1, "transport durukken de ilerliyor",
-               "adim " + juce::String (freeRun.getActiveChainStep() + 1));
+        check (freeRun.getActiveChainStep() == 1, "advances with the transport stopped too",
+               "step " + juce::String (freeRun.getActiveChainStep() + 1));
     }
 
-    // ------------------------------------------------------------------
-    std::printf ("\nSwing: calan kafa editordeki izgaraya esleniyor\n");
+    std::printf ("\nSwing: the playhead is mapped onto the editor grid\n");
     {
         KaradagBeatProcessor proc;
         proc.prepareToPlay (48000.0, 512);
         setParam (proc, "swing", 66.0f);
 
         FakePlayHead head;
-        head.ppq = 8.0 * 0.3;       // gercek faz 0.3
+        head.ppq = 8.0 * 0.3;
         proc.setPlayHead (&head);
 
         runDC (proc, 512, 512, {}, &head);
@@ -693,12 +638,11 @@ int main()
 
         check (std::abs (proc.getPlayheadPhase() - expected) < 1.0e-6
                  && std::abs (expected - realPhase) > 1.0e-3,
-               "calan kafa swing'e gore cizim ekseninde",
-               "gercek " + juce::String (realPhase, 4) + " -> editor " + juce::String (proc.getPlayheadPhase(), 4));
+               "playhead is on the drawing axis with swing",
+               "real " + juce::String (realPhase, 4) + " -> editor " + juce::String (proc.getPlayheadPhase(), 4));
     }
 
-    // ------------------------------------------------------------------
-    std::printf ("\nFiltre zarfi projeyle kaydediliyor\n");
+    std::printf ("\nThe filter envelope is saved with the project\n");
     {
         KaradagBeatProcessor src;
         auto& f = src.getEditableFilterEnvelope();
@@ -713,11 +657,10 @@ int main()
         dst.setStateInformation (state.getData(), (int) state.getSize());
 
         check (samePoints (dst.getEditableFilterEnvelope().getPoints(), f.getPoints()),
-               "filtre zarfi aynen geri geldi");
+               "filter envelope restored exactly");
     }
 
-    // ------------------------------------------------------------------
-    std::printf ("\nMono ve stereo kanal duzenleri\n");
+    std::printf ("\nMono and stereo channel layouts\n");
     {
         for (const int channels : { 1, 2 })
         {
@@ -748,12 +691,12 @@ int main()
                             finite = false;
             }
 
-            check (finite, juce::String (channels) + " kanalda saglikli calisiyor");
+            check (finite, juce::String (channels) + " channel(s): runs cleanly");
         }
     }
 
-    std::printf ("\n%s  (%d basarisiz)\n\n",
-                 failures == 0 ? "TUM TESTLER GECTI" : "BASARISIZ TESTLER VAR",
+    std::printf ("\n%s  (%d failed)\n\n",
+                 failures == 0 ? "ALL TESTS PASSED" : "SOME TESTS FAILED",
                  failures);
 
     return failures == 0 ? 0 : 1;

@@ -1,12 +1,3 @@
-# Karadag Beat - derle, test et, kur
-#
-# Kullanim:
-#   .\build.ps1            derle + testleri calistir + kur
-#   .\build.ps1 -SkipTests testleri atla
-#   .\build.ps1 -Configure CMake'i bastan yapilandir
-#   .\build.ps1 -Validate  kurmadan once pluginval ile dogrula (tools\pluginval\pluginval.exe)
-#   .\build.ps1 -Installer Inno Setup ile build\installer\KaradagBeat-<surum>-Setup.exe uret
-
 param(
     [switch]$SkipTests,
     [switch]$Configure,
@@ -20,83 +11,73 @@ $root = $PSScriptRoot
 $cmake = "C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
 if (-not (Test-Path $cmake)) {
     $found = Get-Command cmake -ErrorAction SilentlyContinue
-    if ($null -eq $found) { throw "CMake bulunamadi." }
+    if ($null -eq $found) { throw "CMake not found." }
     $cmake = $found.Source
 }
 
 if ($Configure -or -not (Test-Path "$root\build\CMakeCache.txt")) {
-    Write-Host "`n== Yapilandiriliyor ==" -ForegroundColor Cyan
-    # Uretici belirtilmiyor: CMake kurulu en yeni Visual Studio'yu secer
+    Write-Host "`n== Configuring ==" -ForegroundColor Cyan
     & $cmake -S $root -B "$root\build" -A x64
-    if ($LASTEXITCODE -ne 0) { throw "CMake yapilandirmasi basarisiz." }
+    if ($LASTEXITCODE -ne 0) { throw "CMake configure failed." }
 }
 
 if (-not $SkipTests) {
-    Write-Host "`n== DSP testleri derleniyor ==" -ForegroundColor Cyan
+    Write-Host "`n== Building DSP tests ==" -ForegroundColor Cyan
     & $cmake --build "$root\build" --config Release --target DspTest
-    if ($LASTEXITCODE -ne 0) { throw "Test derlemesi basarisiz." }
+    if ($LASTEXITCODE -ne 0) { throw "Test build failed." }
 
-    Write-Host "`n== DSP testleri calisiyor ==" -ForegroundColor Cyan
+    Write-Host "`n== Running DSP tests ==" -ForegroundColor Cyan
     & "$root\build\DspTest_artefacts\Release\DspTest.exe"
-    if ($LASTEXITCODE -ne 0) { throw "DSP testleri basarisiz - kurulum yapilmadi." }
+    if ($LASTEXITCODE -ne 0) { throw "DSP tests failed - not installing." }
 
-    Write-Host "`n== Proje durumu testleri derleniyor ==" -ForegroundColor Cyan
+    Write-Host "`n== Building state tests ==" -ForegroundColor Cyan
     & $cmake --build "$root\build" --config Release --target StateTest
-    if ($LASTEXITCODE -ne 0) { throw "Durum testi derlemesi basarisiz." }
+    if ($LASTEXITCODE -ne 0) { throw "State test build failed." }
 
-    Write-Host "`n== Proje durumu testleri calisiyor ==" -ForegroundColor Cyan
+    Write-Host "`n== Running state tests ==" -ForegroundColor Cyan
     & "$root\build\StateTest_artefacts\Release\StateTest.exe"
-    if ($LASTEXITCODE -ne 0) { throw "Durum testleri basarisiz - kurulum yapilmadi." }
+    if ($LASTEXITCODE -ne 0) { throw "State tests failed - not installing." }
 }
 
-Write-Host "`n== VST3 derleniyor ==" -ForegroundColor Cyan
+Write-Host "`n== Building VST3 ==" -ForegroundColor Cyan
 & $cmake --build "$root\build" --config Release --target KaradagBeat_VST3
-if ($LASTEXITCODE -ne 0) { throw "VST3 derlemesi basarisiz." }
+if ($LASTEXITCODE -ne 0) { throw "VST3 build failed." }
 
-Write-Host "`n== Bagimsiz uygulama derleniyor ==" -ForegroundColor Cyan
+Write-Host "`n== Building standalone app ==" -ForegroundColor Cyan
 & $cmake --build "$root\build" --config Release --target KaradagBeat_Standalone
-if ($LASTEXITCODE -ne 0) { throw "Bagimsiz uygulama derlemesi basarisiz." }
+if ($LASTEXITCODE -ne 0) { throw "Standalone build failed." }
 
 $built = "$root\build\KaradagBeat_artefacts\Release\VST3\Karadag Beat.vst3"
-if (-not (Test-Path $built)) { throw "Derlenmis eklenti bulunamadi: $built" }
+if (-not (Test-Path $built)) { throw "Built plugin not found: $built" }
 
 if ($Validate) {
-    # pluginval: Tracktion'in eklenti dogrulayicisi.  Host'larin yaptigi seyleri
-    # (farkli sample rate / blok boyu, durum kaydet-yukle, parametre bombardimani,
-    # editor ac-kapa, thread'ler) sert bicimde dener.
     $pluginval = "$root\tools\pluginval\pluginval.exe"
     if (-not (Test-Path $pluginval)) {
-        throw "pluginval bulunamadi: $pluginval  (https://github.com/Tracktion/pluginval/releases)"
+        throw "pluginval not found: $pluginval  (https://github.com/Tracktion/pluginval/releases)"
     }
 
     Write-Host "`n== pluginval (strictness 10) ==" -ForegroundColor Cyan
 
-    # pluginval bir GUI programi: '&' ile cagirinca PowerShell bitmesini beklemez ve
-    # cikis kodu bos kalir.  Start-Process -Wait ile bekleyip kodu aliyoruz.
-    # GUI testleri editor pencerelerini ekrana acar; -Validate kullanirken bilgisayarin
-    # basinda ol.
     $log = "$root\build\pluginval.txt"
     $p = Start-Process -FilePath $pluginval -Wait -PassThru -NoNewWindow -RedirectStandardOutput $log `
            -ArgumentList @("--strictness-level", "10", "--validate-in-process", "--timeout-ms", "600000", "`"$built`"")
     Get-Content $log | Select-String -Pattern "Starting tests|FAILED|ERROR|SUCCESS|!!!"
-    if ($p.ExitCode -ne 0) { throw "pluginval basarisiz (cikis kodu $($p.ExitCode)) - kurulum yapilmadi. Ayrinti: $log" }
+    if ($p.ExitCode -ne 0) { throw "pluginval failed (exit code $($p.ExitCode)) - not installing. Details: $log" }
 }
 
 if ($Installer) {
     $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
               "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") |
             Where-Object { Test-Path $_ } | Select-Object -First 1
-    if ($null -eq $iscc) { throw "Inno Setup 6 bulunamadi (https://jrsoftware.org/isinfo.php)" }
+    if ($null -eq $iscc) { throw "Inno Setup 6 not found (https://jrsoftware.org/isinfo.php)" }
 
     $version = (Select-String -Path "$root\CMakeLists.txt" -Pattern 'project\(KaradagBeat VERSION ([0-9.]+)').Matches[0].Groups[1].Value
 
-    Write-Host "`n== Kurulum dosyasi ($version) ==" -ForegroundColor Cyan
+    Write-Host "`n== Installer ($version) ==" -ForegroundColor Cyan
     & $iscc "/DAppVersion=$version" "$root\installer\KaradagBeat.iss"
-    if ($LASTEXITCODE -ne 0) { throw "Inno Setup basarisiz." }
+    if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed." }
 }
 
-# FL Studio yalnizca sistem VST3 klasorunu tariyor, oraya kurmak gerekiyor.
-# Yazma izni yoksa UAC ile yukseltilmis bir kopyalama baslatiyoruz.
 $systemDir = "C:\Program Files\Common Files\VST3"
 $dest = Join-Path $systemDir "Karadag Beat.vst3"
 
@@ -113,8 +94,8 @@ if ($canWrite) {
     Copy-Item -LiteralPath $built -Destination $systemDir -Recurse -Force
 }
 else {
-    Write-Host "`n== Kurulum icin yonetici izni isteniyor ==" -ForegroundColor Yellow
-    Write-Host "  Cikacak UAC penceresini onayla." -ForegroundColor Yellow
+    Write-Host "`n== Asking for admin rights to install ==" -ForegroundColor Yellow
+    Write-Host "  Approve the UAC prompt." -ForegroundColor Yellow
 
     $inner = "if (Test-Path -LiteralPath '$dest') { Remove-Item -LiteralPath '$dest' -Recurse -Force }; " +
              "Copy-Item -LiteralPath '$built' -Destination '$systemDir' -Recurse -Force"
@@ -123,15 +104,15 @@ else {
         Start-Process powershell -Verb RunAs `
             -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-Command",$inner -Wait | Out-Null
     } catch {
-        throw "Yonetici izni verilmedi, eklenti kurulamadi."
+        throw "Admin rights not granted, plugin not installed."
     }
 }
 
 if (-not (Test-Path -LiteralPath "$dest\Contents\x86_64-win\Karadag Beat.vst3")) {
-    throw "Kopyalama basarisiz: $dest"
+    throw "Copy failed: $dest"
 }
 
-Write-Host "`n== Kuruldu ==" -ForegroundColor Green
+Write-Host "`n== Installed ==" -ForegroundColor Green
 Write-Host "  $dest"
-Write-Host "`n  FL Studio aciksa yeni eklentiyi gormesi icin:" -ForegroundColor Cyan
+Write-Host "`n  If FL Studio is open, rescan to pick up the new plugin:" -ForegroundColor Cyan
 Write-Host "  Options > Manage plugins > Find more plugins" -ForegroundColor Cyan

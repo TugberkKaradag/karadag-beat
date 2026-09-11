@@ -1,6 +1,3 @@
-# Her push'ta: derle, testleri calistir, pluginval ile dogrula, kurulum dosyasi uret.
-# "v" ile baslayan bir etiket push'lanirsa (ornegin v0.2.0) ayrica GitHub Release
-# olusturulur ve Setup.exe ile VST3 zip'i ona eklenir.
 name: build
 
 on:
@@ -11,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write      # yalnizca Release olusturmak icin
+  contents: write
 
 jobs:
   windows:
@@ -21,32 +18,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Surum
+      - name: Version
         id: version
         shell: pwsh
         run: |
           $m = Select-String -Path CMakeLists.txt -Pattern 'project\(KaradagBeat VERSION ([0-9.]+)'
           $v = $m.Matches[0].Groups[1].Value
           if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$v") {
-            throw "Etiket $env:GITHUB_REF_NAME, CMakeLists.txt'teki surumle (v$v) ayni degil"
+            throw "Tag $env:GITHUB_REF_NAME doesn't match the version in CMakeLists.txt (v$v)"
           }
           "value=$v" >> $env:GITHUB_OUTPUT
-          Write-Host "Surum $v"
+          Write-Host "Version $v"
 
-      # Yerel JUCE yolu runner'da yok; CMakeLists ayni surumu GitHub'dan ceker
-      - name: Yapilandir
+      - name: Configure
         run: cmake -S . -B build -A x64
 
-      - name: Testleri derle
+      - name: Build tests
         run: cmake --build build --config Release --target DspTest StateTest --parallel
 
-      - name: DSP testleri
+      - name: DSP tests
         run: build\DspTest_artefacts\Release\DspTest.exe
 
-      - name: Proje durumu testleri
+      - name: State tests
         run: build\StateTest_artefacts\Release\StateTest.exe
 
-      - name: Eklentiyi derle
+      - name: Build plugin
         run: cmake --build build --config Release --target KaradagBeat_VST3 KaradagBeat_Standalone --parallel
 
       - name: pluginval
@@ -55,24 +51,21 @@ jobs:
           Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip -OutFile pluginval.zip
           Expand-Archive pluginval.zip -DestinationPath pluginval
           New-Item -ItemType Directory -Force pluginval-log | Out-Null
-          # pluginval bir GUI programi: PowerShell '&' ile cagirinca bitmesini beklemez
-          # ve cikis kodu bos kalir.  Start-Process -Wait ile bekleyip kodu aliyoruz.
           $plugin = Resolve-Path "build\KaradagBeat_artefacts\Release\VST3\Karadag Beat.vst3"
           $p = Start-Process -FilePath .\pluginval\pluginval.exe -Wait -PassThru -NoNewWindow `
                  -RedirectStandardOutput pluginval-log\pluginval.txt `
                  -ArgumentList @("--strictness-level", "10", "--validate-in-process",
                                  "--timeout-ms", "600000", "`"$plugin`"")
           Get-Content pluginval-log\pluginval.txt
-          if ($p.ExitCode -ne 0) { throw "pluginval basarisiz (cikis kodu $($p.ExitCode))" }
+          if ($p.ExitCode -ne 0) { throw "pluginval failed (exit code $($p.ExitCode))" }
 
-      # Yerelde kullanilanla ayni Inno Setup surumu (PNG gorseller ve koyu tema 6.5+ ister)
-      - name: Kurulum dosyasi
+      - name: Installer
         shell: pwsh
         run: |
           Invoke-WebRequest https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe -OutFile innosetup.exe
           Start-Process .\innosetup.exe -Wait -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/SP-"
           & "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" "/DAppVersion=${{ steps.version.outputs.value }}" installer\KaradagBeat.iss
-          if ($LASTEXITCODE -ne 0) { throw "Inno Setup basarisiz" }
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
 
       - name: VST3 zip
         shell: pwsh

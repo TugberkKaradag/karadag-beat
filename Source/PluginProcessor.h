@@ -36,82 +36,51 @@ public:
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
 
-    // --- editor arayuzu ----------------------------------------------------
     juce::AudioProcessorValueTreeState apvts;
 
-    /** Editorun duzenledigi uc lane - yalnizca mesaj thread'i. */
     Envelope& getEditableTimeEnvelope()   noexcept { return editTime; }
     Envelope& getEditableVolumeEnvelope() noexcept { return editVolume; }
     Envelope& getEditableFilterEnvelope() noexcept { return editFilter; }
 
-    /** GUI bir zarfi degistirdikten sonra cagirir: degisikligi ses thread'ine yayinlar. */
     void publishEnvelopes();
 
-    /** Slottaki pattern'i GUI zarflarina yukler ve yayinlar (mesaj thread'i).
-        Editor o an MIDI ile calan bir slotu gosteriyorsa, pattern gosterim bitince
-        geri gelecek cizime yazilir. */
     void loadSlotIntoEditor (int index);
 
-    /** GUI'de cizili olan zarflari bir kullanici slotuna kaydeder ve diske yazar. */
     bool saveEditorToSlot (int index, const juce::String& name);
 
-    /** Slotun gorunen adi - kullanici kaydettiyse verdigi ad, yoksa sabit slot adi. */
     juce::String getSlotName (int index) const;
 
-    /** Kullanici bu slota bir pattern kaydetmis mi? */
     bool isSlotFilled (int index) const;
 
-    // --- MIDI ile calan slotun editorde gosterimi ----------------------------
-    // MIDI notasi bir slotu caldiginda editor onu gosterir; kullanicinin cizimi
-    // bu surede bir kenarda bekler ve nota birakilinca aynen geri gelir.  Gosterim
-    // sirasinda yapilan degisiklikler yalnizca o an calan pattern'e uygulanir.
-
-    /** Editor zarflarina slotu gosterim icin yukler (ilk cagrida cizimi saklar). */
     void showSlotInEditor (int index);
 
-    /** Saklanan cizimi editore geri koyar ve sese yayinlar. */
     void restoreDrawingInEditor();
 
     bool isEditorShowingSlot() const noexcept { return editorShowsSlot.load(); }
 
-    /** MIDI ile o an tetiklenen preset, yoksa -1. */
     int  getMidiPreset() const noexcept { return midiActive.load() ? midiPreset.load() : -1; }
 
-    /** Calan kafanin pattern icindeki konumu, 0..1 - swing hesaba katilmis, yani
-        editorde cizilen noktalarla ayni eksende.  GUI cizimi icin. */
     double getPlayheadPhase() const noexcept { return displayPhase.load(); }
 
-    /** Gelen sesin pattern boyunca tepe degerleri - lane arkasindaki dalga formu.
-        Dilimler gercek zamanda tutulur; editor swing'e gore eslemek icin
-        patternToRealPhase kullanir. */
     static constexpr int waveformBins = GrossEngine::kWaveBins;
     float getWaveformPeak (int bin) const noexcept { return engine.getWavePeak (bin); }
 
-    /** Editordeki (duz) pattern konumunun o anki swing ile calindigi gercek konum. */
     double patternToRealPhase (double patternPhase) const noexcept;
 
-    /** Pattern kac bar surer (1, 2 veya 4) - GUI izgarasi buna gore cizilir. */
     int getPatternBars() const noexcept;
 
-    // --- slot zinciri ----------------------------------------------------------
-    // Zincir acikken her pattern turu siradaki adimin slotunu calar:
-    // ornegin "cizim, cizim, Repeat 1/8, Tape Stop".  MIDI tetiklemesi zinciri ezer.
     static constexpr int kMaxChainSteps = 8;
-    static constexpr int kChainDrawing  = -1;      // adim: editordeki cizim
+    static constexpr int kChainDrawing  = -1;
 
     int  getChainStep (int step) const noexcept;
     void setChainStep (int step, int slotOrDrawing) noexcept;
     int  getChainLength() const noexcept           { return chainLength.load(); }
     void setChainLength (int steps) noexcept;
 
-    /** Zincirde o an calan adim (0 tabanli), zincir kapaliysa -1. */
     int  getActiveChainStep() const noexcept       { return activeChainStep.load(); }
 
-    /** Cizili zarflari (ve pattern uzunlugunu) paylasilabilir bir dosyaya yazar. */
     bool exportPattern (const juce::File& file, const juce::String& name) const;
 
-    /** Bir pattern dosyasini GUI zarflarina yukler ve sese yayinlar.
-        Basarili olursa dosyadaki adi loadedName'e yazar. */
     bool importPattern (const juce::File& file, juce::String& loadedName);
 
     static constexpr const char* patternFileExtension = ".kbeat";
@@ -119,29 +88,16 @@ public:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
 private:
-    /** Blok basinda: tetikleme kapandiysa ya da mod degistiyse durumu sifirlar.
-        false donerse bu blokta MIDI olaylari yok sayilir. */
     bool beginMidiBlock();
 
-    /** Tek bir MIDI olayini isler - blok, olayin dustugu sample'da bolunur.
-        Bir nota yeni bir pattern baslattiysa true doner (retrigger icin). */
     bool handleMidiMessage (const juce::MidiMessage& m);
 
-    /** Hangi pattern'in calacagini belirler ve ses zarflarini gunceller.
-          taban   : editordeki cizim (GUI yayini ya da preset parametresi)
-          gecici  : MIDI notasi ya da zincir adimi bir slotu caliyorsa o slot
-        Gecici kaynak bitince taban aynen geri gelir. */
     void updatePatternSources();
 
-    /** Bu an icin gecici kaynak: MIDI slotu, zincir slotu ya da -1 (taban).
-        Zincirin o anki adimini da GUI icin yayinlar. */
     int resolveOverride() noexcept;
 
-    /** Ses zarflari degistiyse ya da swing ayari degistiyse calinacak kopyalari tazeler. */
     void refreshPlayEnvelopes();
 
-    /** Slotu verilen zarflara kopyalar (bos lane'ler varsayilan degerine).
-        Cagiran taraf slotLock'u tutuyor olmali. */
     void copySlot (int index, Envelope& time, Envelope& volume, Envelope& filter) const;
 
     static juce::File getUserPatternFile();
@@ -150,46 +106,40 @@ private:
 
     GrossEngine engine;
 
-    // 48 slot: ilk kisim fabrika, kalani kullanici.  GUI yazar, ses thread'i
-    // try-lock ile okur; kilit alinamazsa yukleme bir sonraki bloga kalir.
     mutable juce::SpinLock slotLock;
     std::vector<GrossPreset> slots { Presets::makeDefaultSlots() };
 
-    // GUI tarafi (yalnizca mesaj thread'i)
     Envelope editTime   { 0.0 };
     Envelope editVolume { 1.0 };
     Envelope editFilter { 1.0 };
 
-    // MIDI slotu gosterilirken bekleyen cizim
     Envelope stashTime   { 0.0 };
     Envelope stashVolume { 1.0 };
     Envelope stashFilter { 1.0 };
     std::atomic<bool> editorShowsSlot { false };
 
-    // yayin kutusu
     juce::SpinLock publishLock;
     Envelope pendingTime   { 0.0 };
     Envelope pendingVolume { 1.0 };
     Envelope pendingFilter { 1.0 };
-    bool pendingIsTweak = false;          // gosterilen slotta yapilan gecici degisiklik mi
+    bool pendingIsTweak = false;
     std::atomic<bool> hasPending { false };
 
-    // --- ses thread'i ---
-    Envelope baseTime   { 0.0 };          // taban: editordeki cizim
+    Envelope baseTime   { 0.0 };
     Envelope baseVolume { 1.0 };
     Envelope baseFilter { 1.0 };
 
-    Envelope audioTime   { 0.0 };         // su an calinan pattern (swing'siz)
+    Envelope audioTime   { 0.0 };
     Envelope audioVolume { 1.0 };
     Envelope audioFilter { 1.0 };
 
-    Envelope playTime   { 0.0 };          // swing uygulanmis kopyalar
+    Envelope playTime   { 0.0 };
     Envelope playVolume { 1.0 };
     Envelope playFilter { 1.0 };
     std::vector<EnvPoint> swingScratch;
 
-    int  lastParamPreset = -1;            // tabana en son yuklenen preset parametresi
-    int  activeOverride  = -1;            // su an calan gecici slot, -1 = taban
+    int  lastParamPreset = -1;
+    int  activeOverride  = -1;
     bool baseChanged     = false;
     bool audioChanged    = true;
     bool swingOn         = false;
@@ -200,7 +150,6 @@ private:
     std::atomic<double> swingAmountForGui { 0.5 };
     std::atomic<int>    swingCellsForGui  { 32 };
 
-    // parametreler
     std::atomic<float>* pPreset       = nullptr;
     std::atomic<float>* pPatternBars  = nullptr;
     std::atomic<float>* pTimeOn       = nullptr;
@@ -218,20 +167,18 @@ private:
     std::atomic<float>* pSwing        = nullptr;
     std::atomic<float>* pChainOn      = nullptr;
 
-    // MIDI tetikleme
     juce::SortedSet<int> heldNotes;
-    int  latchedNote = -1;       // latch modunda acik tutulan nota (yalnizca ses thread'i)
+    int  latchedNote = -1;
     bool wasLatching = false;
-    bool retriggered = false;    // pattern notayla bastan baslatildi, host fazi beklemede
+    bool retriggered = false;
     std::atomic<bool> midiActive { false };
     std::atomic<int>  midiPreset { 0 };
-    static constexpr int midiBaseNote = 60;   // C4 -> ilk preset
+    static constexpr int midiBaseNote = 60;
 
-    // zincir
     std::array<std::atomic<int>, kMaxChainSteps> chainSteps;
     std::atomic<int>  chainLength { 4 };
     std::atomic<int>  activeChainStep { -1 };
-    juce::int64 chainCycle = 0;          // kacinci pattern turu (ses thread'i)
+    juce::int64 chainCycle = 0;
 
     double sampleRateHz = 44100.0;
 

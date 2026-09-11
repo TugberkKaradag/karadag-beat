@@ -4,25 +4,9 @@
 #include <functional>
 #include "Envelope.h"
 
-/**
-    Duzenlenebilir zarf editoru - Gross Beat'in cizim alaninin karsiligi.
-
-    Fare:
-      sol tik (bosluk)    -> yeni nokta ekle ve suruklemeye basla
-      sol tik (nokta)     -> noktayi surukle   (Shift = snap kapali)
-      sag tik (nokta)     -> noktayi sil
-      cift tik (nokta)    -> basamak / egri modunu degistir
-      tutamak (segment)   -> surukleyince egri bukulur, cift / sag tik sifirlar
-      tekerlek (segment)  -> segmentin egrisini (tension) bukur
-      Alt + surukle       -> cizim modu: gecilen her izgara hucresine basamak boyar
-*/
 class EnvelopeEditor  : public juce::Component
 {
 public:
-    /** Lane tipi: dikey eksenin yonunu, snap kademelerini ve olcek etiketlerini belirler.
-          time   : ust = canli, alt = bir pattern geride (bar cinsinden)
-          volume : ust = tam ses, alt = sessiz (yuzde)
-          filter : ust = acik, alt = kapali (Hz) */
     enum class Style { time, volume, filter };
 
     EnvelopeEditor (Envelope& envelopeToEdit, Style laneStyle);
@@ -40,12 +24,8 @@ public:
     void mouseDoubleClick (const juce::MouseEvent&) override;
     void mouseWheelMove   (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
-    /** Zarf her degistiginde cagrilir (ses thread'ine yayin icin). */
     std::function<void()> onChange;
 
-    /** Bir duzenleme hareketi baslamadan HEMEN ONCE cagrilir - geri alma
-        yiginina o anki durumun kaydedilmesi icin. Surukleme boyunca degil,
-        hareket basina bir kez tetiklenir. */
     std::function<void()> onEditBegin;
 
     void setPlayheadPhase (double phase);
@@ -53,23 +33,16 @@ public:
     int  getGridDivisions() const noexcept { return divisions; }
     void setAccentColour (juce::Colour c)  { accent = c; repaint(); }
 
-    /** Ustte bar/vurus numaralarini gosteren cetvel seridi. */
     void setShowRuler (bool shouldShow)    { showRuler = shouldShow; resized(); repaint(); }
 
-    /** Pattern kac bar surer - cetvel ve dikey olcek buna gore etiketlenir. */
     void setPatternBars (int bars);
 
-    /** Filtre lane'i: olcek etiketleri low-pass / high-pass'e gore degisir. */
     void setFilterHighPass (bool highPass);
 
-    /** Arkaya cizilecek dalga formu: pattern boyunca esit dilimlerde tepe degerleri. */
     void setWaveform (const std::vector<float>& peaks)  { waveform = peaks; }
 
-    /** Cizim modu: sol tikla surukleme nokta eklemek yerine basamak boyar.
-        Kapaliyken de Alt basili tutarak gecici olarak kullanilabilir. */
     void setDrawMode (bool shouldDraw)     { drawMode = shouldDraw; repaint(); }
 
-    /** Disaridan (preset yuklemesi gibi) zarf degistiginde cagrilir. */
     void envelopeChangedExternally()
     {
         hoverPoint = dragPoint = hoverHandle = dragHandle = -1;
@@ -90,7 +63,6 @@ private:
     int findPointAt (juce::Point<float> pos) const;
     int findSegmentAt (double phase) const;
 
-    // --- tension tutamaklari ---
     struct SegmentSpan { double x0, y0, x1, y1; bool stepped; };
     SegmentSpan getSegmentSpan (int index) const;
     bool handleVisible (int index) const;
@@ -98,7 +70,6 @@ private:
     int  findHandleAt (juce::Point<float> pos) const;
     double tensionForMidpoint (int index, double value) const;
 
-    // --- cizim modu ---
     int  cellAt (double x) const noexcept;
     void paintCell (int cell, double y);
     void paintAlong (const juce::MouseEvent&);
@@ -113,7 +84,7 @@ private:
 
     Envelope& env;
     const Style style;
-    const bool topIsOne;          // volume / filter: 1 ustte; time: 0 (canli) ustte
+    const bool topIsOne;
     bool filterHighPass = false;
 
     juce::Rectangle<float> plot, scaleColumn, rulerRow;
@@ -121,7 +92,7 @@ private:
     bool showRuler = false;
     int  patternBars = 2;
 
-    int    divisions   = 32;      // 2 bar boyunca kac adim (32 = 1/16'lik)
+    int    divisions   = 32;
     bool   snapEnabled = true;
     double playhead    = 0.0;
 

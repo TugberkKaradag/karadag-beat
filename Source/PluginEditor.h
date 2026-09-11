@@ -5,7 +5,6 @@
 #include "PluginProcessor.h"
 #include "EnvelopeEditor.h"
 
-/** Koyu, duz bir tema. */
 class BeatLookAndFeel  : public juce::LookAndFeel_V4
 {
 public:
@@ -18,11 +17,9 @@ public:
     void drawToggleButton (juce::Graphics&, juce::ToggleButton&,
                            bool shouldDrawHighlighted, bool shouldDrawDown) override;
 
-    /** Palet degistiginde renkleri yeniden okur. */
     void refreshFromTheme();
 };
 
-/** Kompakt palet dugmesi: o anki temanin iki aksan rengini nokta olarak gosterir. */
 class ThemeButton  : public juce::Button
 {
 public:
@@ -30,9 +27,6 @@ public:
     void paintButton (juce::Graphics&, bool shouldDrawHighlighted, bool shouldDrawDown) override;
 };
 
-//==============================================================================
-/** Zincir duzenleyici: CHAIN'in yanindaki "..." ile acilan kucuk panel.
-    Her adim bir slot ya da editordeki cizim; uzunluk 1-8 adim. */
 class ChainPanel  : public juce::Component,
                     private juce::Timer
 {
@@ -61,7 +55,6 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChainPanel)
 };
 
-//==============================================================================
 class KaradagBeatEditor  : public juce::AudioProcessorEditor,
                            private juce::Timer
 {
@@ -73,16 +66,13 @@ public:
     void resized() override;
 
 private:
-    // Tests/EditorRender.cpp: ekran disi goruntu alirken zamanlayiciyi elle ilerletir
     friend struct EditorSnapshot;
 
-    /** Uc zarfin da o anki hali - geri alma yigininda tutulan birim. */
     struct EnvelopeSnapshot
     {
         std::vector<EnvPoint> time, volume, filter;
     };
 
-    /** Bir lane'in basligindaki araclar: ac/kapa, etiket, yumusatma, kaydirma, cizim. */
     struct LaneControls
     {
         juce::ToggleButton toggle;
@@ -95,7 +85,6 @@ private:
 
     void timerCallback() override;
 
-    /** Ust barin solundaki imza: basamak + egri glifi ve wordmark. */
     void drawSignature (juce::Graphics&, juce::Rectangle<int> area) const;
 
     bool keyPressed (const juce::KeyPress&) override;
@@ -107,53 +96,38 @@ private:
     void redo();
     void updateUndoButtons();
 
-    /** Uc editoru disaridan degisen zarflar icin tazeler. */
     void refreshAllEditors();
 
-    /** Combobox'taki slot adlarini processor'dakilerle esitler. */
     void refreshSlotNames();
 
-    /** Cizili zarflari bir kullanici slotuna kaydetmek icin isim sorar. */
     void promptSaveToSlot();
 
-    /** Palet menusunu acar ve secimi diske yazar. */
     void showThemeMenu();
 
-    /** FILE menusu: pattern disa / ice aktarma. */
     void showFileMenu();
     void exportPatternFile();
     void importPatternFile();
 
-    /** Zincir panelini CHAIN'in yaninda acar. */
     void showChainPanel();
 
-    /** Bir lane'i bir izgara adimi ileri ya da geri kaydirir. */
     void shiftLane (EnvelopeEditor& editor, Envelope& env, int direction);
 
-    /** Lane basligindaki araclari kurar (ortak kisim). */
     void setupLane (LaneControls&, EnvelopeEditor&, Envelope&,
                     const juce::String& toggleText, const juce::String& smoothTooltip);
 
-    /** Lane basligini ve editoru verilen alana yerlestirir.
-        Filtre lane'inde baslik tip secici ve rezonansi da tasir. */
     void layoutLane (LaneControls&, EnvelopeEditor&, juce::Rectangle<int> area, bool withFilterExtras);
 
-    /** Renk bagimli her seyi o anki paletten tazeler. */
     void applyThemeColours();
 
-    /** Snap izgarasini pattern uzunluguna gore yeniden hesaplar. */
     void refreshGrid();
 
-    /** Zarflari slota yazar, listeyi tazeler ve slotu secer. */
     void commitSave (int slot, const juce::String& name);
 
-    /** Kaydetmek icin hedef slot: secili slot kullaniciysa o, degilse ilk bos slot. */
     int chooseTargetSlot() const;
 
     KaradagBeatProcessor& processor;
     BeatLookAndFeel lookAndFeel;
 
-    // setTooltip cagrilari ancak boyle bir pencere varsa gorunur hale gelir
     juce::TooltipWindow tooltips { this, 700 };
 
     EnvelopeEditor timeEditor;
@@ -162,7 +136,6 @@ private:
 
     LaneControls timeLane, volLane, filterLane;
 
-    // filtre lane'ine ozel
     juce::ComboBox filterTypeBox;
     juce::Slider   filterResoSlider { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
     juce::Label    filterResoLabel;
@@ -177,7 +150,6 @@ private:
     juce::Slider mixSlider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox };
     juce::Label  mixLabel;
 
-    // alt bar: MIDI, zincir, swing
     juce::ToggleButton midiToggle   { "MIDI" };
     juce::ToggleButton latchToggle  { "LATCH" };
     juce::ToggleButton retrigToggle { "RETRIG" };

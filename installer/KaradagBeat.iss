@@ -1,15 +1,3 @@
-﻿; Karadag Beat - Windows kurulum dosyasi (Inno Setup 6.7+)
-;
-; Once eklentiyi Release olarak derle, sonra:
-;   ISCC.exe installer\KaradagBeat.iss /DAppVersion=0.2.0
-; ya da kisaca:  .\build.ps1 -Installer
-;
-; Cikti: build\installer\KaradagBeat-<surum>-Setup.exe
-;
-; Gorseller (icon.ico, wizard*.png) Tests\BrandRender.cpp ile logodan uretilir.
-; /DTestRoot=<klasor> verilirse her sey o klasore, yonetici izni istemeden kurulur
-; (yalnizca kurulum / kaldirma testi icin).
-
 #define AppName "Karadag Beat"
 #define RepoUrl "https://github.com/TugberkKaradag/karadag-beat"
 
@@ -27,7 +15,6 @@
   #define PrivMode   "lowest"
   #define AppIdGuid  "{{195CE2F2-C8CC-4CFE-8653-9E83E0B44262}-test"
 #else
-  ; FL Studio yalnizca sistem VST3 klasorunu tariyor
   #define VstDir     "{commoncf64}\VST3"
   #define AppDir     "{autopf}\" + AppName
   #define PrivMode   "admin"
@@ -68,34 +55,19 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 PrivilegesRequired={#PrivMode}
 
-; Dil penceresi yalnizca Windows dili listede yoksa cikar
-ShowLanguageDialog=auto
-
-; FL acikken eklenti dosyasi kilitli olur: Setup bunu fark edip kapatmayi teklif eder
 CloseApplications=yes
 CloseApplicationsFilter=*.exe,*.dll,*.vst3
 RestartApplications=no
 
-[Languages]
-Name: "en"; MessagesFile: "compiler:Default.isl"
-Name: "tr"; MessagesFile: "compiler:Languages\Turkish.isl"
+[Messages]
+FinishedLabel=[name] is installed.%n%nIn FL Studio open Options > Manage plugins and click Find more plugins. It then shows up under Effects.
 
 [CustomMessages]
-en.TypeFull=VST3 plugin and standalone app
-en.TypeCustom=Custom
-en.CompVst3=VST3 plugin
-en.CompStandalone=Standalone app (runs without a DAW)
-en.OpenStandalone=Open the standalone app
-
-tr.TypeFull=VST3 eklentisi ve bağımsız uygulama
-tr.TypeCustom=Özel
-tr.CompVst3=VST3 eklentisi
-tr.CompStandalone=Bağımsız uygulama (DAW olmadan çalışır)
-tr.OpenStandalone=Bağımsız uygulamayı aç
-
-[Messages]
-en.FinishedLabel=[name] is installed.%n%nIn FL Studio open Options > Manage plugins and click Find more plugins. It then shows up under Effects.
-tr.FinishedLabel=[name] kuruldu.%n%nFL Studio'da Options > Manage plugins menüsünden Find more plugins'e tıkla. Eklenti Effects altında görünür.
+TypeFull=VST3 plugin and standalone app
+TypeCustom=Custom
+CompVst3=VST3 plugin
+CompStandalone=Standalone app (runs without a DAW)
+OpenStandalone=Open the standalone app
 
 [Types]
 Name: "full";   Description: "{cm:TypeFull}"
@@ -120,5 +92,4 @@ Filename: "{app}\Karadag Beat.exe"; Description: "{cm:OpenStandalone}"; \
     Flags: postinstall nowait skipifsilent unchecked; Components: standalone
 
 [UninstallDelete]
-; Kaydedilen pattern'ler (%APPDATA%\Karadag\KaradagBeat) bilerek silinmiyor
 Type: filesandordirs; Name: "{#VstDir}\Karadag Beat.vst3"

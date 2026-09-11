@@ -5,7 +5,6 @@
 
 namespace
 {
-    /** 0.75 -> "3/4",  1.5 -> "1 1/2",  2 -> "2" */
     juce::String barsToText (double bars)
     {
         const int quarters = juce::roundToInt (bars * 4.0);
@@ -20,7 +19,6 @@ namespace
         return juce::String (whole) + " " + fractions[rest];
     }
 
-    /** 12000 -> "12k",  2400 -> "2.4k",  380 -> "380" */
     juce::String hzToText (double hz)
     {
         if (hz >= 1000.0)
@@ -33,14 +31,11 @@ namespace
         return juce::String (juce::roundToInt (hz));
     }
 
-    /** Arayuz cizgileri ve yazilari: paletin yazi rengi, verilen saydamlikta. */
     juce::Colour ink (float alpha)
     {
         return Themes::current().text.withAlpha (alpha);
     }
 
-    // Iki zarf editoru arasinda paylasilan pano - time'dan kopyalayip
-    // volume'a yapistirmak da mumkun, ilginc sonuclar veriyor.
     std::vector<EnvPoint> envelopeClipboard;
 
     constexpr float kPointRadius   = 5.0f;
@@ -54,7 +49,6 @@ EnvelopeEditor::EnvelopeEditor (Envelope& envelopeToEdit, Style laneStyle)
     setOpaque (true);
     setMouseCursor (juce::MouseCursor::CrosshairCursor);
 
-    // Klavye odagi ana pencerede kalsin ki Ctrl+Z her zaman calissin
     setMouseClickGrabsKeyboardFocus (false);
 }
 
@@ -67,7 +61,6 @@ void EnvelopeEditor::resized()
     plot        = area;
 }
 
-//==============================================================================
 float EnvelopeEditor::xToPixel (double x) const noexcept
 {
     return plot.getX() + (float) x * plot.getWidth();
@@ -109,15 +102,12 @@ double EnvelopeEditor::snapY (double y) const noexcept
     if (! snapEnabled)
         return y;
 
-    // Volume: 1/16'lik kademeler.  Filtre: 24 kademe (~yarim oktav).
-    // Time: 1/32 pattern = 1/16'lik nota kadar geri.
     const double steps = style == Style::volume ? 16.0
                        : style == Style::filter ? 24.0
                                                 : 32.0;
     return juce::jlimit (0.0, 1.0, std::round (y * steps) / steps);
 }
 
-//==============================================================================
 int EnvelopeEditor::findPointAt (juce::Point<float> pos) const
 {
     int best = -1;
@@ -146,7 +136,7 @@ int EnvelopeEditor::findSegmentAt (double phase) const
     if (n == 0)
         return -1;
 
-    int result = n - 1;   // varsayilan: sarilan son segment
+    int result = n - 1;
 
     for (int i = 0; i < n; ++i)
         if (env.getPoint (i).x <= phase)
@@ -155,7 +145,6 @@ int EnvelopeEditor::findSegmentAt (double phase) const
     return result;
 }
 
-//==============================================================================
 EnvelopeEditor::SegmentSpan EnvelopeEditor::getSegmentSpan (int index) const
 {
     const int n = env.getNumPoints();
@@ -178,7 +167,6 @@ bool EnvelopeEditor::handleVisible (int index) const
 
     const auto s = getSegmentSpan (index);
 
-    // basamakta, duz segmentte ya da dar segmentte bukulecek bir sey yok
     return ! s.stepped
         && std::abs (s.y1 - s.y0) > 1.0e-6
         && (s.x1 - s.x0) * plot.getWidth() > 26.0f;
@@ -205,9 +193,6 @@ int EnvelopeEditor::findHandleAt (juce::Point<float> pos) const
 
 double EnvelopeEditor::tensionForMidpoint (int index, double value) const
 {
-    // Egri t^k, k = 2^(-4*tension).  Segmentin ortasi (t = 0.5) degeri
-    // y0 + (y1 - y0) * 0.5^k.  Farenin gosterdigi degere ulasmak icin k'yi
-    // cozuyoruz - boylece tutamak fareyi birebir takip ediyor.
     const auto s = getSegmentSpan (index);
 
     double f = (value - s.y0) / (s.y1 - s.y0);
@@ -234,7 +219,6 @@ void EnvelopeEditor::paintAlong (const juce::MouseEvent& e)
     const int cell = cellAt (pixelToX (e.position.x));
     const double y = snapY (pixelToY (e.position.y));
 
-    // hizli surukleme hucre atlamasin: aradaki butun hucreleri de boya
     const int from = (lastPaintCell < 0) ? cell : lastPaintCell;
     const int lo = juce::jmin (from, cell), hi = juce::jmax (from, cell);
 
@@ -249,7 +233,6 @@ void EnvelopeEditor::paintAlong (const juce::MouseEvent& e)
     repaint();
 }
 
-//==============================================================================
 void EnvelopeEditor::setPlayheadPhase (double phase)
 {
     phase -= std::floor (phase);
@@ -287,7 +270,6 @@ void EnvelopeEditor::setGridDivisions (int divisionsPerPattern)
     repaint();
 }
 
-//==============================================================================
 void EnvelopeEditor::mouseDown (const juce::MouseEvent& e)
 {
     snapEnabled = ! e.mods.isShiftDown();
@@ -295,7 +277,6 @@ void EnvelopeEditor::mouseDown (const juce::MouseEvent& e)
     const auto pos = e.position;
     int index = findPointAt (pos);
 
-    // --- cizim modu ---
     if (! e.mods.isRightButtonDown() && (drawMode || e.mods.isAltDown()))
     {
         if (onEditBegin)
@@ -361,8 +342,6 @@ void EnvelopeEditor::mouseDown (const juce::MouseEvent& e)
 
     if (index < 0)
     {
-        // bosluga tiklandi: yeni nokta ekle ve hemen suruklemeye basla.
-        // yeni nokta, tiklanan yerdeki segmentin seklini devralsin
         const double x = snapX (pixelToX (pos.x));
         const double y = snapY (pixelToY (pos.y));
 
@@ -386,7 +365,6 @@ void EnvelopeEditor::showContextMenu()
 {
     juce::PopupMenu menu;
 
-    // Menu kendi bakisini component'ten devralmiyor, elle vermek gerekiyor
     menu.setLookAndFeel (&getLookAndFeel());
 
     menu.addSectionHeader (style == Style::volume ? "Volume envelope"
@@ -404,7 +382,6 @@ void EnvelopeEditor::showContextMenu()
             if (result == 0)
                 return;
 
-            // Kopyalama zarfi degistirmiyor, geri alma adimi da gerekmiyor
             if (result == 3)
             {
                 envelopeClipboard = env.getPoints();
@@ -554,10 +531,8 @@ void EnvelopeEditor::mouseWheelMove (const juce::MouseEvent& e, const juce::Mous
     repaint();
 }
 
-//==============================================================================
 void EnvelopeEditor::drawGrid (juce::Graphics& g) const
 {
-    // yatay cizgiler: 4 esit dilim
     g.setColour (ink (0.06f));
 
     for (int i = 1; i < 4; ++i)
@@ -566,7 +541,6 @@ void EnvelopeEditor::drawGrid (juce::Graphics& g) const
         g.drawHorizontalLine ((int) y, plot.getX(), plot.getRight());
     }
 
-    // dikey cizgiler: adim / vurus / bar
     const int steps = juce::jmax (1, divisions);
 
     for (int i = 0; i <= steps; ++i)
@@ -614,7 +588,6 @@ void EnvelopeEditor::drawCurve (juce::Graphics& g) const
         }
     }
 
-    // dolguyu taban cizgisine kapat
     fill.lineTo (plot.getRight(), yToPixel (0.0));
     fill.closeSubPath();
 
@@ -634,7 +607,6 @@ void EnvelopeEditor::drawWaveform (juce::Graphics& g) const
     if (bins < 2)
         return;
 
-    // Sessiz malzeme de gorunsun diye dB olcegi: -48 dBFS ... 0 dBFS -> 0 ... 1
     auto shape = [] (float peak)
     {
         if (peak <= 1.0e-5f)
@@ -722,20 +694,16 @@ void EnvelopeEditor::drawScale (juce::Graphics& g) const
 {
     g.setFont (juce::FontOptions (9.5f));
 
-    // dar panellerde etiketler ust uste binmesin
     const int steps = (plot.getHeight() < 90.0f) ? 2 : 4;
 
     for (int i = 0; i <= steps; ++i)
     {
         const double value = (double) i / (double) steps;
 
-        // Time: 0 = canli, 1 = pattern boyu geride (bar cinsinden).  Volume: yuzde.
-        // Filtre: o yuksekligin kesim frekansi.
         const juce::String text = style == Style::volume ? juce::String (juce::roundToInt (value * 100.0))
                                 : style == Style::filter ? hzToText (FilterMap::cutoffHz (value, filterHighPass))
                                                          : barsToText (value * patternBars);
 
-        // uc noktalardaki etiketler cizim alaninin disina tasmasin
         const float y = juce::jlimit (plot.getY() + 7.0f, plot.getBottom() - 7.0f,
                                       yToPixel (value));
         const auto row = juce::Rectangle<float> (scaleColumn.getX(), y - 7.0f,
@@ -744,7 +712,6 @@ void EnvelopeEditor::drawScale (juce::Graphics& g) const
         g.setColour (ink (value == 0.0 ? 0.42f : 0.26f));
         g.drawText (text, row, juce::Justification::centredRight);
     }
-
 }
 
 void EnvelopeEditor::drawRuler (juce::Graphics& g) const
@@ -754,7 +721,6 @@ void EnvelopeEditor::drawRuler (juce::Graphics& g) const
 
     g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
 
-    // 4/4 varsayimi: her bar 4 ceyrek nota
     const int beats = patternBars * 4;
 
     for (int k = 0; k < beats; ++k)
@@ -783,12 +749,10 @@ void EnvelopeEditor::paint (juce::Graphics& g)
     drawWaveform (g);
     drawCurve (g);
 
-    // calan kafa
     const float px = xToPixel (playhead);
     g.setColour (theme.playhead.withAlpha (0.8f));
     g.drawVerticalLine ((int) px, plot.getY(), plot.getBottom());
 
-    // kafanin zarf uzerindeki konumu
     g.setColour (theme.playhead);
     g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f)
                      .withCentre ({ px, yToPixel (env.valueAt (playhead)) }));
@@ -796,7 +760,6 @@ void EnvelopeEditor::paint (juce::Graphics& g)
     drawHandles (g);
     drawPoints (g);
 
-    // cizim modu: ince bir cerceve ve imlecin altindaki hucre
     if (drawMode)
     {
         g.setColour (accent.withAlpha (0.35f));

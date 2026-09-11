@@ -5,9 +5,7 @@ project(KaradagBeat VERSION 0.2.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# JUCE 8.0.10 kaynak agaci.  Yerelde indirilmis kopya kullanilir; yoksa (ornegin
-# GitHub Actions'ta) ayni surum GitHub'dan cekilir.
-set(JUCE_DIR "C:/Users/user/Downloads/juce-8.0.10-windows/JUCE" CACHE PATH "JUCE kaynak klasoru")
+set(JUCE_DIR "C:/Users/user/Downloads/juce-8.0.10-windows/JUCE" CACHE PATH "JUCE source folder")
 
 if(EXISTS "${JUCE_DIR}/CMakeLists.txt")
     add_subdirectory("${JUCE_DIR}" JUCE)
@@ -62,9 +60,6 @@ target_link_libraries(KaradagBeat PRIVATE
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
 
-#===============================================================================
-# DSP dogrulama testleri (host olmadan calisan konsol uygulamasi)
-#===============================================================================
 juce_add_console_app(DspTest PRODUCT_NAME "DspTest")
 
 target_sources(DspTest PRIVATE
@@ -84,9 +79,6 @@ target_link_libraries(DspTest PRIVATE
   PUBLIC
     juce::juce_recommended_config_flags)
 
-#===============================================================================
-# Pattern gorsellerini PNG olarak ureten yardimci (GUI dogrulamasi)
-#===============================================================================
 juce_add_console_app(PresetRender PRODUCT_NAME "PresetRender")
 
 target_sources(PresetRender PRIVATE
@@ -106,10 +98,6 @@ target_link_libraries(PresetRender PRIVATE
   PUBLIC
     juce::juce_recommended_config_flags)
 
-#===============================================================================
-# Proje durumu (kaydet/ac) ve kanal duzeni testleri
-# Eklenti hedefine link ederek JucePlugin_* tanimlarini ve paylasilan kodu alir.
-#===============================================================================
 juce_add_console_app(StateTest PRODUCT_NAME "StateTest")
 
 target_sources(StateTest PRIVATE Tests/StateTest.cpp)
@@ -125,9 +113,6 @@ target_link_libraries(StateTest PRIVATE
   PUBLIC
     juce::juce_recommended_config_flags)
 
-#===============================================================================
-# Eklenti penceresini ekran disinda PNG'ye cizen yardimci (arayuz duzeni kontrolu)
-#===============================================================================
 juce_add_console_app(EditorRender PRODUCT_NAME "EditorRender")
 
 target_sources(EditorRender PRIVATE Tests/EditorRender.cpp)
@@ -143,9 +128,6 @@ target_link_libraries(EditorRender PRIVATE
   PUBLIC
     juce::juce_recommended_config_flags)
 
-#===============================================================================
-# Logodan simge ve kurulum sihirbazi gorsellerini ureten yardimci
-#===============================================================================
 juce_add_console_app(BrandRender PRODUCT_NAME "BrandRender")
 
 target_sources(BrandRender PRIVATE
@@ -163,9 +145,6 @@ target_link_libraries(BrandRender PRIVATE
   PUBLIC
     juce::juce_recommended_config_flags)
 
-#===============================================================================
-# Hizli calmada aliasing olcumu (FFT)
-#===============================================================================
 juce_add_console_app(AliasTest PRODUCT_NAME "AliasTest")
 
 target_sources(AliasTest PRIVATE

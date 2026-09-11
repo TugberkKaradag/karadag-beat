@@ -33,4 +33,6 @@ cmake -S . -B build -A x64
 cmake --build build --config Release --target KaradagBeat_VST3
 ```
 
-`build.ps1` builds, runs the tests and installs the plugin.
+`build.ps1` builds, runs the tests and installs the plugin. Options: `-SkipTests`,
+`-Configure`, `-Validate` (runs [pluginval](https://github.com/Tracktion/pluginval) from
+`tools\pluginval`), `-Installer` (builds the Setup with Inno Setup 6.5+).
