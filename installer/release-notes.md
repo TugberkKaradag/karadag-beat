@@ -1,4 +1,4 @@
-Run the Setup, then in FL Studio open Options > Manage plugins and click Find more plugins.
+Run the Setup and rescan plugins in your DAW. Works in any VST3 host on 64-bit Windows: Ableton Live, FL Studio, Cubase, Studio One, Reaper, Bitwig and others.
 
 The installer isn't code-signed, so Windows may warn about an unknown publisher: click More info > Run anyway.
 

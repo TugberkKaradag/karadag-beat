@@ -60,7 +60,7 @@ CloseApplicationsFilter=*.exe,*.dll,*.vst3
 RestartApplications=no
 
 [Messages]
-FinishedLabel=[name] is installed.%n%nIn FL Studio open Options > Manage plugins and click Find more plugins. It then shows up under Effects.
+FinishedLabel=[name] is installed as a VST3 effect.%n%nIf your DAW is open, rescan plugins so it shows up.
 
 [CustomMessages]
 TypeFull=VST3 plugin and standalone app

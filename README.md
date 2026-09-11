@@ -11,7 +11,9 @@ VST3 and standalone app for 64-bit Windows.
 
 Download `KaradagBeat-x.y.z-Setup.exe` from
 [Releases](https://github.com/TugberkKaradag/karadag-beat/releases/latest) and run it.
-In FL Studio, open Options > Manage plugins and click Find more plugins.
+It installs the VST3 into `C:\Program Files\Common Files\VST3`, which every VST3 host scans:
+Ableton Live, FL Studio, Cubase, Studio One, Reaper, Bitwig and others. If your DAW is open,
+rescan plugins.
 
 The installer isn't code-signed, so Windows may say it's from an unknown publisher.
 Click More info > Run anyway.

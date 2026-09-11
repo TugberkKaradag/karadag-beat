@@ -114,5 +114,4 @@ if (-not (Test-Path -LiteralPath "$dest\Contents\x86_64-win\Karadag Beat.vst3"))
 
 Write-Host "`n== Installed ==" -ForegroundColor Green
 Write-Host "  $dest"
-Write-Host "`n  If FL Studio is open, rescan to pick up the new plugin:" -ForegroundColor Cyan
-Write-Host "  Options > Manage plugins > Find more plugins" -ForegroundColor Cyan
+Write-Host "`n  If your DAW is open, rescan plugins to pick up the new build." -ForegroundColor Cyan
