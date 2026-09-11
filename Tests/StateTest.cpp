@@ -660,6 +660,54 @@ int main()
                "filter envelope restored exactly");
     }
 
+    std::printf ("\nTwo plugin instances saving user patterns\n");
+    {
+        const auto file = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                            .getChildFile ("karadag_beat_test_user_patterns.xml");
+        file.deleteFile();
+        KaradagBeatProcessor::setUserPatternFileForTesting (file);
+
+        const int first = Presets::numPresets();
+
+        {
+            KaradagBeatProcessor a, b;
+
+            a.getEditableVolumeEnvelope().clearTo (0.3);
+            a.saveEditorToSlot (first, "From A");
+
+            b.getEditableVolumeEnvelope().clearTo (0.6);
+            b.saveEditorToSlot (first + 1, "From B");
+        }
+
+        KaradagBeatProcessor reopened;
+
+        check (reopened.isSlotFilled (first) && reopened.getSlotName (first) == "From A"
+                 && reopened.isSlotFilled (first + 1) && reopened.getSlotName (first + 1) == "From B",
+               "a second instance doesn't wipe the first one's pattern",
+               "'" + reopened.getSlotName (first) + "', '" + reopened.getSlotName (first + 1) + "'");
+
+        KaradagBeatProcessor::setUserPatternFileForTesting ({});
+        file.deleteFile();
+    }
+
+    std::printf ("\nTail length follows the pattern length\n");
+    {
+        KaradagBeatProcessor proc;
+        proc.prepareToPlay (48000.0, 512);
+        setParam (proc, "patternBars", 2.0f);
+
+        FakePlayHead head;
+        head.bpm = 90.0;
+        proc.setPlayHead (&head);
+        runDC (proc, 512, 512, {}, &head);
+
+        const double expected = 16.0 * 60.0 / 90.0;
+
+        check (std::abs (proc.getTailLengthSeconds() - expected) < 1.0e-6,
+               "tail = one pattern (4 bars at 90 BPM)",
+               juce::String (proc.getTailLengthSeconds(), 3) + " s");
+    }
+
     std::printf ("\nMono and stereo channel layouts\n");
     {
         for (const int channels : { 1, 2 })

@@ -10,7 +10,7 @@ project(KaradagBeat VERSION 0.2.1 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(JUCE_DIR "C:/Users/user/Downloads/juce-8.0.10-windows/JUCE" CACHE PATH "JUCE source folder")
+set(JUCE_DIR "" CACHE PATH "Local JUCE 8.0.10 source folder; fetched from GitHub when empty")
 
 if(EXISTS "${JUCE_DIR}/CMakeLists.txt")
     add_subdirectory("${JUCE_DIR}" JUCE)
@@ -44,13 +44,15 @@ juce_add_plugin(KaradagBeat
     FORMATS                 ${KARADAG_FORMATS}
     VST3_CATEGORIES         "Fx" "Modulation"
     AU_MAIN_TYPE            kAudioUnitType_MusicEffect
+    MICROPHONE_PERMISSION_ENABLED TRUE
+    MICROPHONE_PERMISSION_TEXT "Karadag Beat processes the audio coming from your input device."
     PRODUCT_NAME            "Karadag Beat")
 
 target_sources(KaradagBeat PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/Envelope.cpp
-    Source/GrossEngine.cpp
+    Source/BeatEngine.cpp
     Source/Presets.cpp
     Source/Swing.cpp
     Source/EnvelopeEditor.cpp
@@ -76,7 +78,7 @@ juce_add_console_app(DspTest PRODUCT_NAME "DspTest")
 target_sources(DspTest PRIVATE
     Tests/DspTest.cpp
     Source/Envelope.cpp
-    Source/GrossEngine.cpp
+    Source/BeatEngine.cpp
     Source/Presets.cpp
     Source/Swing.cpp)
 
@@ -161,7 +163,7 @@ juce_add_console_app(AliasTest PRODUCT_NAME "AliasTest")
 target_sources(AliasTest PRIVATE
     Tests/AliasTest.cpp
     Source/Envelope.cpp
-    Source/GrossEngine.cpp)
+    Source/BeatEngine.cpp)
 
 target_compile_definitions(AliasTest PUBLIC
     JUCE_WEB_BROWSER=0

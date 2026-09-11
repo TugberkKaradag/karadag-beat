@@ -1,12 +1,12 @@
-#include "GrossEngine.h"
+#include "BeatEngine.h"
 #include "FilterMap.h"
 #include <cmath>
 #include <vector>
 
 namespace
 {
-    constexpr int kTaps   = GrossEngine::kSincTaps;
-    constexpr int kBands  = GrossEngine::kSincBands;
+    constexpr int kTaps   = BeatEngine::kSincTaps;
+    constexpr int kBands  = BeatEngine::kSincBands;
     constexpr int kPhases = 1024;
     constexpr int kBandStride = (kPhases + 1) * kTaps;
 
@@ -72,7 +72,7 @@ namespace
     }
 }
 
-void GrossEngine::prepare (double sampleRate, int channels)
+void BeatEngine::prepare (double sampleRate, int channels)
 {
     sr          = sampleRate;
     numChannels = juce::jlimit (1, 8, channels);
@@ -92,7 +92,7 @@ void GrossEngine::prepare (double sampleRate, int channels)
     reset();
 }
 
-void GrossEngine::reset()
+void BeatEngine::reset()
 {
     ring.clear();
     writePos     = 0;
@@ -118,13 +118,13 @@ void GrossEngine::reset()
     wavePeak = 0.0f;
 }
 
-void GrossEngine::setPatternLengthSamples (double lengthInSamples) noexcept
+void BeatEngine::setPatternLengthSamples (double lengthInSamples) noexcept
 {
     const double maxLen = (double) (ringLength - 8);
     patternLen = juce::jlimit (1.0, juce::jmax (1.0, maxLen), lengthInSamples);
 }
 
-void GrossEngine::setSmoothing (double timeMs, double volumeMs) noexcept
+void BeatEngine::setSmoothing (double timeMs, double volumeMs) noexcept
 {
     fadeLength = juce::jmax (16, (int) (sr * juce::jlimit (0.5, 200.0, timeMs) * 0.001));
     gainStep   = 1.0 / juce::jmax (1.0, sr * juce::jlimit (0.5, 200.0, volumeMs) * 0.001);
@@ -132,7 +132,7 @@ void GrossEngine::setSmoothing (double timeMs, double volumeMs) noexcept
     fadeCounter = juce::jmin (fadeCounter, fadeLength);
 }
 
-void GrossEngine::setFilter (bool highPass, double resonance, double smoothMs) noexcept
+void BeatEngine::setFilter (bool highPass, double resonance, double smoothMs) noexcept
 {
     const double q = 0.7071 * std::pow (12.0, juce::jlimit (0.0, 1.0, resonance));
     const double k = 1.0 / q;
@@ -147,7 +147,7 @@ void GrossEngine::setFilter (bool highPass, double resonance, double smoothMs) n
     filterStep = 1.0 / juce::jmax (1.0, sr * juce::jlimit (0.5, 200.0, smoothMs) * 0.001);
 }
 
-void GrossEngine::updateFilterCoefficients() noexcept
+void BeatEngine::updateFilterCoefficients() noexcept
 {
     const double hz = juce::jmin (FilterMap::cutoffHz (1.0 - filterClosed, filterHighPass), sr * 0.45);
     const double g  = std::tan (juce::MathConstants<double>::pi * hz / sr);
@@ -159,12 +159,12 @@ void GrossEngine::updateFilterCoefficients() noexcept
     coefClosed = filterClosed;
 }
 
-void GrossEngine::setPhase (double newPhase) noexcept
+void BeatEngine::setPhase (double newPhase) noexcept
 {
     phase = newPhase - std::floor (newPhase);
 }
 
-float GrossEngine::readHermite (int channel, double position) const noexcept
+float BeatEngine::readHermite (int channel, double position) const noexcept
 {
     const auto* data = ring.getReadPointer (channel);
 
@@ -191,7 +191,7 @@ float GrossEngine::readHermite (int channel, double position) const noexcept
     return (float) ((((c3 * frac) + c2) * frac + c1) * frac + c0);
 }
 
-float GrossEngine::readSinc (int channel, double position, int band) const noexcept
+float BeatEngine::readSinc (int channel, double position, int band) const noexcept
 {
     const auto* data = ring.getReadPointer (channel);
 
@@ -225,7 +225,7 @@ float GrossEngine::readSinc (int channel, double position, int band) const noexc
     return (float) acc;
 }
 
-float GrossEngine::readSample (int channel, double position, int band) const noexcept
+float BeatEngine::readSample (int channel, double position, int band) const noexcept
 {
     const double floored = std::floor (position);
 
@@ -243,7 +243,7 @@ float GrossEngine::readSample (int channel, double position, int band) const noe
                                         : readHermite (channel, position);
 }
 
-void GrossEngine::processBlock (juce::AudioBuffer<float>& buffer,
+void BeatEngine::processBlock (juce::AudioBuffer<float>& buffer,
                                 const Envelope& timeEnv,
                                 const Envelope& volEnv,
                                 bool  timeEnabled,
@@ -253,7 +253,7 @@ void GrossEngine::processBlock (juce::AudioBuffer<float>& buffer,
     processBlock (buffer, timeEnv, volEnv, openFilter, timeEnabled, volEnabled, false, mix);
 }
 
-void GrossEngine::processBlock (juce::AudioBuffer<float>& buffer,
+void BeatEngine::processBlock (juce::AudioBuffer<float>& buffer,
                                 const Envelope& timeEnv,
                                 const Envelope& volEnv,
                                 const Envelope& filterEnv,

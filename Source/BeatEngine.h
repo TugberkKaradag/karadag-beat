@@ -5,10 +5,10 @@
 #include <atomic>
 #include "Envelope.h"
 
-class GrossEngine
+class BeatEngine
 {
 public:
-    GrossEngine() = default;
+    BeatEngine() = default;
 
     void prepare (double sampleRate, int numChannels);
     void reset();

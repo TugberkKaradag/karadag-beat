@@ -4,7 +4,7 @@
 #include <vector>
 #include "Envelope.h"
 
-struct GrossPreset
+struct Pattern
 {
     juce::String          name;
     std::vector<EnvPoint> time;
@@ -16,7 +16,7 @@ struct GrossPreset
 
 namespace Presets
 {
-    const std::vector<GrossPreset>& factory();
+    const std::vector<Pattern>& factory();
 
     int numPresets();
     juce::StringArray names();
@@ -29,5 +29,5 @@ namespace Presets
 
     juce::String defaultDisplayName (int index);
 
-    std::vector<GrossPreset> makeDefaultSlots();
+    std::vector<Pattern> makeDefaultSlots();
 }

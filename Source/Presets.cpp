@@ -72,9 +72,9 @@ namespace
         return pts;
     }
 
-    std::vector<GrossPreset> buildFactory()
+    std::vector<Pattern> buildFactory()
     {
-        std::vector<GrossPreset> p;
+        std::vector<Pattern> p;
 
         p.push_back ({ "Off", {}, {} });
 
@@ -133,9 +133,9 @@ namespace
     }
 }
 
-const std::vector<GrossPreset>& Presets::factory()
+const std::vector<Pattern>& Presets::factory()
 {
-    static const std::vector<GrossPreset> presets = buildFactory();
+    static const std::vector<Pattern> presets = buildFactory();
     return presets;
 }
 
@@ -188,9 +188,9 @@ juce::String Presets::defaultDisplayName (int index)
     return "User " + juce::String (index - numPresets() + 1);
 }
 
-std::vector<GrossPreset> Presets::makeDefaultSlots()
+std::vector<Pattern> Presets::makeDefaultSlots()
 {
-    std::vector<GrossPreset> slots = factory();
+    std::vector<Pattern> slots = factory();
     slots.reserve ((size_t) kNumSlots);
 
     while ((int) slots.size() < kNumSlots)

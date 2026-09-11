@@ -16,6 +16,12 @@ namespace
     {
         dst.setPoints (src.getPoints());
     }
+
+    juce::File& userPatternFileOverride()
+    {
+        static juce::File file;
+        return file;
+    }
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout KaradagBeatProcessor::createParameterLayout()
@@ -230,6 +236,8 @@ bool KaradagBeatProcessor::saveEditorToSlot (int index, const juce::String& name
     if (! Presets::isUserSlot (index))
         return false;
 
+    loadUserSlotsFromDisk();
+
     {
         const juce::SpinLock::ScopedLockType lock (slotLock);
         auto& slot = slots[(size_t) index];
@@ -343,8 +351,21 @@ bool KaradagBeatProcessor::isSlotFilled (int index) const
     return ! slots[(size_t) index].isEmpty();
 }
 
+void KaradagBeatProcessor::reloadUserSlots()
+{
+    loadUserSlotsFromDisk();
+}
+
+void KaradagBeatProcessor::setUserPatternFileForTesting (const juce::File& file)
+{
+    userPatternFileOverride() = file;
+}
+
 juce::File KaradagBeatProcessor::getUserPatternFile()
 {
+    if (userPatternFileOverride() != juce::File())
+        return userPatternFileOverride();
+
     return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
              .getChildFile ("Karadag")
              .getChildFile ("KaradagBeat")
@@ -686,6 +707,7 @@ void KaradagBeatProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     const double samplesPerBeat = (60.0 / bpm) * sampleRateHz;
 
     engine.setPatternLengthSamples (patternBeats * samplesPerBeat);
+    tailSeconds.store (patternBeats * 60.0 / bpm);
     engine.setSmoothing (pTimeSmooth->load(), pVolSmooth->load());
     engine.setFilter (pFilterType->load() > 0.5f, pFilterReso->load(), pFilterSmooth->load());
 

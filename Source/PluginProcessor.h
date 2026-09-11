@@ -4,7 +4,7 @@
 #include <array>
 #include <atomic>
 #include "Envelope.h"
-#include "GrossEngine.h"
+#include "BeatEngine.h"
 #include "Presets.h"
 
 class KaradagBeatProcessor  : public juce::AudioProcessor
@@ -25,7 +25,7 @@ public:
     bool acceptsMidi() const override                   { return true; }
     bool producesMidi() const override                  { return false; }
     bool isMidiEffect() const override                  { return false; }
-    double getTailLengthSeconds() const override        { return 0.0; }
+    double getTailLengthSeconds() const override        { return tailSeconds.load(); }
 
     int getNumPrograms() override                       { return 1; }
     int getCurrentProgram() override                    { return 0; }
@@ -48,6 +48,10 @@ public:
 
     bool saveEditorToSlot (int index, const juce::String& name);
 
+    void reloadUserSlots();
+
+    static void setUserPatternFileForTesting (const juce::File& file);
+
     juce::String getSlotName (int index) const;
 
     bool isSlotFilled (int index) const;
@@ -62,7 +66,7 @@ public:
 
     double getPlayheadPhase() const noexcept { return displayPhase.load(); }
 
-    static constexpr int waveformBins = GrossEngine::kWaveBins;
+    static constexpr int waveformBins = BeatEngine::kWaveBins;
     float getWaveformPeak (int bin) const noexcept { return engine.getWavePeak (bin); }
 
     double patternToRealPhase (double patternPhase) const noexcept;
@@ -104,10 +108,10 @@ private:
     void loadUserSlotsFromDisk();
     void saveUserSlotsToDisk() const;
 
-    GrossEngine engine;
+    BeatEngine engine;
 
     mutable juce::SpinLock slotLock;
-    std::vector<GrossPreset> slots { Presets::makeDefaultSlots() };
+    std::vector<Pattern> slots { Presets::makeDefaultSlots() };
 
     Envelope editTime   { 0.0 };
     Envelope editVolume { 1.0 };
@@ -147,6 +151,7 @@ private:
     int    appliedCells  = -1;
 
     std::atomic<double> displayPhase { 0.0 };
+    std::atomic<double> tailSeconds { 4.0 };
     std::atomic<double> swingAmountForGui { 0.5 };
     std::atomic<int>    swingCellsForGui  { 32 };
 

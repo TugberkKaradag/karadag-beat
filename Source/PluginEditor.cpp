@@ -324,6 +324,7 @@ KaradagBeatEditor::KaradagBeatEditor (KaradagBeatProcessor& p)
             presetBox.addItem (names[i], i + 1);
         }
     }
+    processor.reloadUserSlots();
     refreshSlotNames();
 
     presetAttach = std::make_unique<APVTS::ComboBoxAttachment> (processor.apvts, "preset", presetBox);

@@ -1,6 +1,6 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 #include "../Source/Envelope.h"
-#include "../Source/GrossEngine.h"
+#include "../Source/BeatEngine.h"
 #include "../Source/Presets.h"
 #include "../Source/Swing.h"
 #include "../Source/FilterMap.h"
@@ -53,7 +53,7 @@ namespace
     {
         const double patLength = cfg.patternLength();
 
-        GrossEngine engine;
+        BeatEngine engine;
         engine.prepare (cfg.sampleRate, 1);
         engine.setPatternLengthSamples (patLength);
         engine.setPhase (0.0);
@@ -187,7 +187,7 @@ namespace
         return e;
     }
 
-    const GrossPreset& preset (const juce::String& name)
+    const Pattern& preset (const juce::String& name)
     {
         for (const auto& p : Presets::factory())
             if (p.name == name)
@@ -472,7 +472,7 @@ int main()
         auto t = fromPoints (pr.time, 0.0);
         auto v = fromPoints (pr.volume, 1.0);
 
-        GrossEngine engine;
+        BeatEngine engine;
         engine.prepare (kSampleRate, 1);
         engine.setPatternLengthSamples (patternLenSamples);
         engine.setPhase (0.0);
@@ -648,7 +648,7 @@ int main()
         auto t = fromPoints (pr.time, 0.0);
         auto v = fromPoints (pr.volume, 1.0);
 
-        GrossEngine engine;
+        BeatEngine engine;
         engine.prepare (kSampleRate, 1);
         engine.setPhase (0.0);
 
@@ -706,7 +706,7 @@ int main()
         t.setPoints (dense);
         v.setPoints (dense);
 
-        GrossEngine engine;
+        BeatEngine engine;
         engine.prepare (kSampleRate, 2);
         engine.setPatternLengthSamples (patternLenSamples);
 
@@ -744,7 +744,7 @@ int main()
             auto t = fromPoints (scenario == 0 ? gate.time   : half.time,   0.0);
             auto v = fromPoints (scenario == 0 ? gate.volume : half.volume, 1.0);
 
-            GrossEngine engine;
+            BeatEngine engine;
             engine.prepare (kSampleRate, 1);
             engine.setPatternLengthSamples (patternLenSamples);
             engine.setPhase (0.0);
@@ -786,7 +786,7 @@ int main()
     {
         Envelope t (0.0), v (1.0);
 
-        GrossEngine engine;
+        BeatEngine engine;
         engine.prepare (kSampleRate, 1);
         engine.setPatternLengthSamples (patternLenSamples);
         engine.setPhase (0.0);
@@ -805,7 +805,7 @@ int main()
             engine.processBlock (block, t, v, true, true, 1.0f);
         }
 
-        const int bins    = GrossEngine::kWaveBins;
+        const int bins    = BeatEngine::kWaveBins;
         const int quarter = bins / 4;
 
         float loudMin = 1.0f, quietMax = 0.0f;
@@ -828,7 +828,7 @@ int main()
             auto t = fromPoints (gate.time, 0.0);
             auto v = fromPoints (gate.volume, 1.0);
 
-            GrossEngine engine;
+            BeatEngine engine;
             engine.prepare (kSampleRate, 1);
             engine.setPatternLengthSamples (patternLenSamples);
             engine.setSmoothing (4.0, ms);
@@ -872,7 +872,7 @@ int main()
             auto t = fromPoints (repeat.time, 0.0);
             auto v = fromPoints (repeat.volume, 1.0);
 
-            GrossEngine engine;
+            BeatEngine engine;
             engine.prepare (kSampleRate, 1);
             engine.setPatternLengthSamples (patternLenSamples);
             engine.setSmoothing (ms, 2.0);
@@ -994,7 +994,7 @@ int main()
         Envelope t (0.0), v (1.0);
         t.setPoints (swung);
 
-        GrossEngine engine;
+        BeatEngine engine;
         engine.prepare (kSampleRate, 1);
         engine.setPatternLengthSamples (patternLenSamples);
         engine.setPhase (0.0);
@@ -1048,7 +1048,7 @@ int main()
         Envelope t (0.0), v (1.0);
         v.setPoints (swung);
 
-        GrossEngine engine;
+        BeatEngine engine;
         engine.prepare (kSampleRate, 1);
         engine.setPatternLengthSamples (patternLenSamples);
         engine.setPhase (0.0);
@@ -1092,7 +1092,7 @@ int main()
         {
             Envelope t (0.0), v (1.0);
 
-            GrossEngine engine;
+            BeatEngine engine;
             engine.prepare (kSampleRate, 1);
             engine.setPatternLengthSamples (patternLenSamples);
             engine.setPhase (0.0);

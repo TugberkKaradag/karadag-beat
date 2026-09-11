@@ -23,6 +23,10 @@ VST3 and the Audio Unit for Logic Pro and GarageBand. The package isn't notarize
 blocks it the first time: open System Settings > Privacy & Security, click Open Anyway and
 open the package again (on older macOS, right-click the package and choose Open).
 
+To uninstall, use Settings > Apps on Windows. On macOS, delete Karadag Beat from
+`/Library/Audio/Plug-Ins/VST3`, `/Library/Audio/Plug-Ins/Components` and `/Applications`.
+Your saved patterns stay in your user folder.
+
 ## Triggering patterns from MIDI
 
 Notes from C4 up select pattern slots. The plugin sits on an audio track, so send it MIDI
@@ -45,7 +49,7 @@ from another track:
 ## Build
 
 CMake 3.22+ and Visual Studio 2022+ (Windows) or Xcode command line tools (macOS).
-JUCE 8.0.10 is downloaded automatically.
+JUCE 8.0.10 is downloaded automatically (or pass `-DJUCE_DIR=<path>` to use a local copy).
 
 ```
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release

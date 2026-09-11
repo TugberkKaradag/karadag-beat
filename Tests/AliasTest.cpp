@@ -1,6 +1,6 @@
 #include <juce_dsp/juce_dsp.h>
 #include "../Source/Envelope.h"
-#include "../Source/GrossEngine.h"
+#include "../Source/BeatEngine.h"
 
 #include <cmath>
 #include <cstdio>
@@ -32,7 +32,7 @@ namespace
         Envelope timeEnv = constantRate (rate);
         Envelope volEnv (1.0);
 
-        GrossEngine engine;
+        BeatEngine engine;
         engine.prepare (kSampleRate, 1);
         engine.setPatternLengthSamples (patternLen);
         engine.setPhase (0.0);
