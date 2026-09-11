@@ -19,7 +19,15 @@
 class EnvelopeEditor  : public juce::Component
 {
 public:
-    EnvelopeEditor (Envelope& envelopeToEdit, bool isVolumeStyle);
+    /** Lane tipi: dikey eksenin yonunu, snap kademelerini ve olcek etiketlerini belirler.
+          time   : ust = canli, alt = bir pattern geride (bar cinsinden)
+          volume : ust = tam ses, alt = sessiz (yuzde)
+          filter : ust = acik, alt = kapali (Hz) */
+    enum class Style { time, volume, filter };
+
+    EnvelopeEditor (Envelope& envelopeToEdit, Style laneStyle);
+    EnvelopeEditor (Envelope& envelopeToEdit, bool isVolumeStyle)
+        : EnvelopeEditor (envelopeToEdit, isVolumeStyle ? Style::volume : Style::time) {}
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -50,6 +58,9 @@ public:
 
     /** Pattern kac bar surer - cetvel ve dikey olcek buna gore etiketlenir. */
     void setPatternBars (int bars);
+
+    /** Filtre lane'i: olcek etiketleri low-pass / high-pass'e gore degisir. */
+    void setFilterHighPass (bool highPass);
 
     /** Arkaya cizilecek dalga formu: pattern boyunca esit dilimlerde tepe degerleri. */
     void setWaveform (const std::vector<float>& peaks)  { waveform = peaks; }
@@ -101,7 +112,9 @@ private:
     void drawRuler (juce::Graphics&) const;
 
     Envelope& env;
-    const bool volumeStyle;
+    const Style style;
+    const bool topIsOne;          // volume / filter: 1 ustte; time: 0 (canli) ustte
+    bool filterHighPass = false;
 
     juce::Rectangle<float> plot, scaleColumn, rulerRow;
     juce::Colour accent { 0xff35d0c8 };

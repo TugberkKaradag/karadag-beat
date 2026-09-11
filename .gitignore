@@ -1,6 +1,9 @@
 # CMake / Visual Studio derleme ciktilari (~1 GB)
 build/
 
+# Indirilen yardimci araclar (pluginval) - depoya girmesin
+tools/
+
 # Visual Studio / VS Code yerel dosyalari
 .vs/
 .vscode/

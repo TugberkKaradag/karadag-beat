@@ -13,6 +13,8 @@
 #include "../Source/Envelope.h"
 #include "../Source/GrossEngine.h"
 #include "../Source/Presets.h"
+#include "../Source/Swing.h"
+#include "../Source/FilterMap.h"
 
 #include <cmath>
 #include <cstdio>
@@ -1021,6 +1023,275 @@ int main()
                    juce::String ("tepe ") + juce::String (peak, 3)
                      + " @faz " + juce::String (peakPhase, 3)
                      + "  sicrama " + juce::String (jump, 3));
+        }
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nSwing zaman bukmesi\n");
+    {
+        const int cells = 32;       // 2 bar 4/4 = 32 onaltilik
+
+        double worstRoundTrip = 0.0;
+
+        for (int i = 0; i <= 1000; ++i)
+        {
+            const double t = i / 1000.0;
+            const double back = Swing::patternToReal (Swing::realToPattern (t, cells, 0.66), cells, 0.66);
+            worstRoundTrip = juce::jmax (worstRoundTrip, std::abs (back - t));
+        }
+
+        check (worstRoundTrip < 1.0e-12, "gercek -> pattern -> gercek ayni yere donuyor",
+               juce::String (worstRoundTrip, 15));
+
+        bool evenFixed = true;
+
+        for (int k = 0; k <= cells; k += 2)
+            evenFixed = evenFixed && std::abs (Swing::patternToReal (k / (double) cells, cells, 0.7)
+                                               - k / (double) cells) < 1.0e-12;
+
+        const double oddStart = Swing::patternToReal (1.0 / cells, cells, 0.66);
+
+        check (evenFixed && std::abs (oddStart - 2.0 * 0.66 / cells) < 1.0e-12,
+               "vuruslar yerinde, ara onaltiliklar itiliyor",
+               "1. onaltilik " + juce::String (oddStart * cells, 3) + " hucreye kaydi");
+
+        check (Swing::patternToReal (0.3, cells, 0.5) == 0.3 && ! Swing::isActive (cells, 0.5),
+               "%50 swing duz demek");
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nSwing'li repeat: kaynak adimin basindan, normal hizda\n");
+    {
+        // Giris testere dis: her sample'in degeri kendi gercek fazi (0..1).
+        // Cikis = okunan kaynak konumu.  Swing'li bir repeat adimi kaynak adimin
+        // BASINDAN (0) baslamali ve normal hizda (egim 1) ilerlemeli.
+        const int cells = 32;
+        const double amount = 0.66;
+
+        std::vector<EnvPoint> swung;
+        Swing::apply (preset ("Repeat 1/16").time, swung, cells, amount, true);
+
+        Envelope t (0.0), v (1.0);
+        t.setPoints (swung);
+
+        GrossEngine engine;
+        engine.prepare (kSampleRate, 1);
+        engine.setPatternLengthSamples (patternLenSamples);
+        engine.setPhase (0.0);
+
+        std::vector<float> out;
+        juce::AudioBuffer<float> block (1, kBlockSize);
+
+        for (int n = 0; n < patLen * 2; n += kBlockSize)
+        {
+            for (int i = 0; i < kBlockSize; ++i)
+                block.setSample (0, i, (float) std::fmod ((double) (n + i) / patternLenSamples, 1.0));
+
+            engine.processBlock (block, t, v, true, true, 1.0f);
+
+            for (int i = 0; i < kBlockSize; ++i)
+                out.push_back (block.getSample (0, i));
+        }
+
+        double worstStart = 0.0, worstSlope = 0.0;
+
+        for (int pair = 0; pair < cells / 2; ++pair)
+        {
+            // ikinci (tekrarlanan) onaltiligin gercek baslangici ve bitisi
+            const double start = Swing::patternToReal ((2 * pair + 1) / (double) cells, cells, amount);
+            const double end   = Swing::patternToReal ((2 * pair + 2) / (double) cells, cells, amount);
+            const double first = (2 * pair) / (double) cells;     // kaynak adimin basi
+
+            // capraz gecisi (~4 ms) atla, adimin ortasindan olc
+            const int a = patLen + (int) ((start + 0.25 * (end - start)) * patternLenSamples);
+            const int b = patLen + (int) ((start + 0.75 * (end - start)) * patternLenSamples);
+
+            const double expectedA = first + (a - patLen) / patternLenSamples - start;
+            worstStart = juce::jmax (worstStart, std::abs (out[(size_t) a] - expectedA));
+
+            const double slope = (out[(size_t) b] - out[(size_t) a]) / ((b - a) / patternLenSamples);
+            worstSlope = juce::jmax (worstSlope, std::abs (slope - 1.0));
+        }
+
+        check (worstStart < 1.0e-3, "tekrar kaynak adimin basindan basliyor",
+               "en buyuk kayma " + juce::String (worstStart * patternLenSamples, 1) + " sample");
+        check (worstSlope < 1.0e-3, "tekrar normal hizda (perde bozulmuyor)",
+               "egim hatasi " + juce::String (worstSlope, 5));
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nSwing'li gate\n");
+    {
+        const int cells = 32;
+        const double amount = 0.66;
+
+        std::vector<EnvPoint> swung;
+        Swing::apply (preset ("Gate 1/16").volume, swung, cells, amount, false);
+
+        Envelope t (0.0), v (1.0);
+        v.setPoints (swung);
+
+        GrossEngine engine;
+        engine.prepare (kSampleRate, 1);
+        engine.setPatternLengthSamples (patternLenSamples);
+        engine.setPhase (0.0);
+
+        juce::AudioBuffer<float> block (1, kBlockSize);
+        std::vector<float> out;
+
+        for (int n = 0; n < patLen; n += kBlockSize)
+        {
+            for (int i = 0; i < kBlockSize; ++i)
+                block.setSample (0, i, 1.0f);
+
+            engine.processBlock (block, t, v, true, true, 1.0f);
+
+            for (int i = 0; i < kBlockSize; ++i)
+                out.push_back (block.getSample (0, i));
+        }
+
+        // Her ciftte gate'in kapandigi ilk sample (cikis 0.5'in altina indiginde)
+        double worst = 0.0;
+
+        for (int pair = 0; pair < cells / 2; ++pair)
+        {
+            const double expected = Swing::patternToReal ((2 * pair + 1) / (double) cells, cells, amount)
+                                      * patternLenSamples;
+            int found = -1;
+
+            // ciftin basinda gate yeni aciliyor (2 ms rampa) - onu atla
+            for (int i = (int) (pair * 2.0 / cells * patternLenSamples) + 400; i < (int) out.size(); ++i)
+                if (out[(size_t) i] < 0.5f) { found = i; break; }
+
+            // 2 ms'lik slew'in ortasi 0.5'e denk geliyor: ~1 ms gecikme beklenir
+            worst = juce::jmax (worst, std::abs (found - expected - kSampleRate * 0.001));
+        }
+
+        check (worst < 2.0, "gate kenarlari swing'li konumda",
+               "en buyuk sapma " + juce::String (worst, 1) + " sample");
+    }
+
+    // ------------------------------------------------------------------
+    std::printf ("\nFiltre lane'i\n");
+    {
+        auto runFiltered = [&] (const Envelope& filterEnv, bool filterOn, bool highPass,
+                                double freq, double reso, int patterns, bool toggleHalfway = false)
+        {
+            Envelope t (0.0), v (1.0);
+
+            GrossEngine engine;
+            engine.prepare (kSampleRate, 1);
+            engine.setPatternLengthSamples (patternLenSamples);
+            engine.setPhase (0.0);
+            engine.setFilter (highPass, reso, 5.0);
+
+            std::vector<float> out;
+            juce::AudioBuffer<float> block (1, kBlockSize);
+            const int total = patLen * patterns;
+
+            for (int n = 0; n < total; n += kBlockSize)
+            {
+                for (int i = 0; i < kBlockSize; ++i)
+                    block.setSample (0, i, (float) (0.5 * std::sin (juce::MathConstants<double>::twoPi
+                                                                    * freq * (n + i) / kSampleRate)));
+
+                const bool on = toggleHalfway ? (n < total / 2) : filterOn;
+                engine.processBlock (block, t, v, filterEnv, true, true, on, 1.0f);
+
+                for (int i = 0; i < kBlockSize; ++i)
+                    out.push_back (block.getSample (0, i));
+            }
+
+            return out;
+        };
+
+        // 1) Tamamen acik lane: filtresiz yolla bit-bit ayni
+        {
+            Envelope open (1.0);
+            const auto a = runFiltered (open, true,  false, 437.0, 0.8, 1);
+            const auto b = runFiltered (open, false, false, 437.0, 0.8, 1);
+
+            float diff = 0.0f;
+
+            for (size_t i = 0; i < a.size(); ++i)
+                diff = juce::jmax (diff, std::abs (a[i] - b[i]));
+
+            check (diff == 0.0f, "acik filtre bit-bit seffaf",
+                   "en buyuk fark " + juce::String (diff, 9));
+        }
+
+        auto levelDb = [] (const std::vector<float>& x)
+        {
+            const int n = (int) x.size();
+            return 20.0 * std::log10 (juce::jmax (1.0e-9, rms (x, n / 2, n / 2) / (0.5 / std::sqrt (2.0))));
+        };
+
+        // 2) Kapali (%25 acik) low-pass: ~190 Hz kesim
+        {
+            Envelope closed (0.25);
+            closed.clearTo (0.25);
+
+            const double lowDb  = levelDb (runFiltered (closed, true, false,   50.0, 0.0, 1));
+            const double highDb = levelDb (runFiltered (closed, true, false, 5000.0, 0.0, 1));
+
+            check (lowDb > -1.5 && highDb < -40.0, "low-pass bas gecirir, tizi keser",
+                   "50 Hz " + juce::String (lowDb, 1) + " dB, 5 kHz " + juce::String (highDb, 1) + " dB  (kesim "
+                     + juce::String (FilterMap::cutoffHz (0.25, false), 0) + " Hz)");
+
+            const double hpLow  = levelDb (runFiltered (closed, true, true,   50.0, 0.0, 1));
+            const double hpHigh = levelDb (runFiltered (closed, true, true, 12000.0, 0.0, 1));
+
+            check (hpLow < -40.0 && hpHigh > -1.5, "high-pass tizi gecirir, basi keser",
+                   "50 Hz " + juce::String (hpLow, 1) + " dB, 12 kHz " + juce::String (hpHigh, 1) + " dB  (kesim "
+                     + juce::String (FilterMap::cutoffHz (0.25, true), 0) + " Hz)");
+        }
+
+        // 3) Basamakli filtre gate'i: kenarlarda tik yok.  Rezonanssiz olculuyor:
+        //    rezonans varken hizli tarama kesim frekansinda kisa bir "zap" cinlamasi
+        //    uretir (rezonansli filtrenin sesi) ve ardisik sample farki bunu da
+        //    sayar.  Burada gecisin kendisinin sureksiz olmadigini dogruluyoruz.
+        {
+            Envelope steps (1.0);
+            steps.setPoints (preset ("Gate 1/16").volume);
+
+            const auto out = runFiltered (steps, true, false, 437.0, 0.0, 1);
+            const float jump = maxJump (out, 0, (int) out.size());
+
+            // 437 Hz, 0.5 genlik sinusun kendi en buyuk adimi ~0.029
+            check (jump < 0.06f, "basamakli filtre zarfi tiksiz",
+                   "en buyuk sicrama " + juce::String (jump, 4));
+        }
+
+        // 4) En yuksek rezonansta hizli tarama: patlamiyor
+        {
+            Envelope sweep (1.0);
+            sweep.setPoints ({ { 0.0, 1.0 }, { 0.5, 0.0 }, { 1.0, 1.0 } });
+
+            const auto out = runFiltered (sweep, true, false, 180.0, 1.0, 1);
+
+            bool finite = true;
+            float peak = 0.0f;
+
+            for (float x : out)
+            {
+                finite = finite && std::isfinite (x);
+                peak = juce::jmax (peak, std::abs (x));
+            }
+
+            check (finite && peak < 4.0f, "tam rezonansta tarama kararli",
+                   "tepe " + juce::String (peak, 2));
+        }
+
+        // 5) Kapaliyken lane'i kapatmak: filtre rampayla acilir, tik yok
+        {
+            Envelope closed (0.2);
+            closed.clearTo (0.2);
+
+            const auto out = runFiltered (closed, true, false, 437.0, 0.3, 1, true);
+            const int half = (int) out.size() / 2;
+
+            check (maxJump (out, half - 2000, 4000) < 0.06f, "lane kapatilinca tik yok",
+                   "en buyuk sicrama " + juce::String (maxJump (out, half - 2000, 4000), 4));
         }
     }
 

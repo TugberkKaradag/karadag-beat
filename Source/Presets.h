@@ -9,6 +9,9 @@ struct GrossPreset
     juce::String          name;
     std::vector<EnvPoint> time;      // bos ise duz 0 (canli)
     std::vector<EnvPoint> volume;    // bos ise duz 1 (tam ses)
+    std::vector<EnvPoint> filter {}; // bos ise duz 1 (filtre acik)
+
+    bool isEmpty() const noexcept { return time.empty() && volume.empty() && filter.empty(); }
 };
 
 namespace Presets
@@ -26,7 +29,7 @@ namespace Presets
     /** Bir slotun kullanici tarafindan yazilabilir olup olmadigi. */
     bool isUserSlot (int index);
 
-    /** Parametre icin sabit slot isimleri ("1 Off" ... "36 User 20").
+    /** Parametre icin sabit slot isimleri ("1 Off" ... "48 User 27").
         VST parametresinin secenek listesi bu - asla degismemeli. */
     juce::StringArray slotNames();
 

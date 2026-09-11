@@ -1,12 +1,24 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(KaradagBeat VERSION 0.1.0 LANGUAGES CXX)
+project(KaradagBeat VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# JUCE 8.0.10 kaynak agaci
-add_subdirectory("C:/Users/user/Downloads/juce-8.0.10-windows/JUCE" JUCE)
+# JUCE 8.0.10 kaynak agaci.  Yerelde indirilmis kopya kullanilir; yoksa (ornegin
+# GitHub Actions'ta) ayni surum GitHub'dan cekilir.
+set(JUCE_DIR "C:/Users/user/Downloads/juce-8.0.10-windows/JUCE" CACHE PATH "JUCE kaynak klasoru")
+
+if(EXISTS "${JUCE_DIR}/CMakeLists.txt")
+    add_subdirectory("${JUCE_DIR}" JUCE)
+else()
+    include(FetchContent)
+    FetchContent_Declare(JUCE
+        GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+        GIT_TAG        8.0.10
+        GIT_SHALLOW    TRUE)
+    FetchContent_MakeAvailable(JUCE)
+endif()
 
 juce_add_plugin(KaradagBeat
     COMPANY_NAME            "Karadag"
@@ -29,6 +41,7 @@ target_sources(KaradagBeat PRIVATE
     Source/Envelope.cpp
     Source/GrossEngine.cpp
     Source/Presets.cpp
+    Source/Swing.cpp
     Source/EnvelopeEditor.cpp
     Source/Theme.cpp)
 
@@ -55,7 +68,8 @@ target_sources(DspTest PRIVATE
     Tests/DspTest.cpp
     Source/Envelope.cpp
     Source/GrossEngine.cpp
-    Source/Presets.cpp)
+    Source/Presets.cpp
+    Source/Swing.cpp)
 
 target_compile_definitions(DspTest PUBLIC
     JUCE_WEB_BROWSER=0
@@ -102,6 +116,24 @@ target_compile_definitions(StateTest PUBLIC
     JUCE_USE_CURL=0)
 
 target_link_libraries(StateTest PRIVATE
+    KaradagBeat
+    juce::juce_audio_utils
+    juce::juce_dsp
+  PUBLIC
+    juce::juce_recommended_config_flags)
+
+#===============================================================================
+# Eklenti penceresini ekran disinda PNG'ye cizen yardimci (arayuz duzeni kontrolu)
+#===============================================================================
+juce_add_console_app(EditorRender PRODUCT_NAME "EditorRender")
+
+target_sources(EditorRender PRIVATE Tests/EditorRender.cpp)
+
+target_compile_definitions(EditorRender PUBLIC
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0)
+
+target_link_libraries(EditorRender PRIVATE
     KaradagBeat
     juce::juce_audio_utils
     juce::juce_dsp

@@ -4,10 +4,14 @@
 #   .\build.ps1            derle + testleri calistir + kur
 #   .\build.ps1 -SkipTests testleri atla
 #   .\build.ps1 -Configure CMake'i bastan yapilandir
+#   .\build.ps1 -Validate  kurmadan once pluginval ile dogrula (tools\pluginval\pluginval.exe)
+#   .\build.ps1 -Installer Inno Setup ile build\installer\KaradagBeat-<surum>-Setup.exe uret
 
 param(
     [switch]$SkipTests,
-    [switch]$Configure
+    [switch]$Configure,
+    [switch]$Validate,
+    [switch]$Installer
 )
 
 $ErrorActionPreference = "Stop"
@@ -54,6 +58,41 @@ if ($LASTEXITCODE -ne 0) { throw "Bagimsiz uygulama derlemesi basarisiz." }
 
 $built = "$root\build\KaradagBeat_artefacts\Release\VST3\Karadag Beat.vst3"
 if (-not (Test-Path $built)) { throw "Derlenmis eklenti bulunamadi: $built" }
+
+if ($Validate) {
+    # pluginval: Tracktion'in eklenti dogrulayicisi.  Host'larin yaptigi seyleri
+    # (farkli sample rate / blok boyu, durum kaydet-yukle, parametre bombardimani,
+    # editor ac-kapa, thread'ler) sert bicimde dener.
+    $pluginval = "$root\tools\pluginval\pluginval.exe"
+    if (-not (Test-Path $pluginval)) {
+        throw "pluginval bulunamadi: $pluginval  (https://github.com/Tracktion/pluginval/releases)"
+    }
+
+    Write-Host "`n== pluginval (strictness 10) ==" -ForegroundColor Cyan
+
+    # pluginval bir GUI programi: '&' ile cagirinca PowerShell bitmesini beklemez ve
+    # cikis kodu bos kalir.  Start-Process -Wait ile bekleyip kodu aliyoruz.
+    # GUI testleri editor pencerelerini ekrana acar; -Validate kullanirken bilgisayarin
+    # basinda ol.
+    $log = "$root\build\pluginval.txt"
+    $p = Start-Process -FilePath $pluginval -Wait -PassThru -NoNewWindow -RedirectStandardOutput $log `
+           -ArgumentList @("--strictness-level", "10", "--validate-in-process", "--timeout-ms", "600000", "`"$built`"")
+    Get-Content $log | Select-String -Pattern "Starting tests|FAILED|ERROR|SUCCESS|!!!"
+    if ($p.ExitCode -ne 0) { throw "pluginval basarisiz (cikis kodu $($p.ExitCode)) - kurulum yapilmadi. Ayrinti: $log" }
+}
+
+if ($Installer) {
+    $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+              "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") |
+            Where-Object { Test-Path $_ } | Select-Object -First 1
+    if ($null -eq $iscc) { throw "Inno Setup 6 bulunamadi (https://jrsoftware.org/isinfo.php)" }
+
+    $version = (Select-String -Path "$root\CMakeLists.txt" -Pattern 'project\(KaradagBeat VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+
+    Write-Host "`n== Kurulum dosyasi ($version) ==" -ForegroundColor Cyan
+    & $iscc "/DAppVersion=$version" "$root\installer\KaradagBeat.iss"
+    if ($LASTEXITCODE -ne 0) { throw "Inno Setup basarisiz." }
+}
 
 # FL Studio yalnizca sistem VST3 klasorunu tariyor, oraya kurmak gerekiyor.
 # Yazma izni yoksa UAC ile yukseltilmis bir kopyalama baslatiyoruz.

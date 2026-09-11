@@ -1,4 +1,5 @@
 #include "GrossEngine.h"
+#include "FilterMap.h"
 #include <cmath>
 #include <vector>
 
@@ -94,6 +95,7 @@ void GrossEngine::prepare (double sampleRate, int channels)
     fadeLength    = juce::jmax (16, (int) (sampleRate * 0.004));   // ~4 ms
     jumpThreshold = juce::jmax (8.0, sampleRate * 0.001);          // ~1 ms
     gainStep      = 1.0 / juce::jmax (1.0, sampleRate * 0.002);    // tam salinim 2 ms
+    filterStep    = 1.0 / juce::jmax (1.0, sampleRate * 0.005);    // tam acma/kapama 5 ms
 
     smoothedMix.reset (sampleRate, 0.02);
 
@@ -115,6 +117,12 @@ void GrossEngine::reset()
     currentGain  = 1.0;
     smoothedMix.setCurrentAndTargetValue (1.0);
 
+    filterClosed = 0.0;
+    coefClosed   = -1.0;
+
+    for (int c = 0; c < 8; ++c)
+        fIc1[c] = fIc2[c] = 0.0;
+
     for (auto& p : wavePeaks)
         p.store (0.0f, std::memory_order_relaxed);
 
@@ -135,6 +143,34 @@ void GrossEngine::setSmoothing (double timeMs, double volumeMs) noexcept
 
     // Suren bir capraz gecis yeni uzunluktan uzun kalmasin
     fadeCounter = juce::jmin (fadeCounter, fadeLength);
+}
+
+void GrossEngine::setFilter (bool highPass, double resonance, double smoothMs) noexcept
+{
+    // Q 0.707 (duz) ... ~8.5 (belirgin tepe)
+    const double q = 0.7071 * std::pow (12.0, juce::jlimit (0.0, 1.0, resonance));
+    const double k = 1.0 / q;
+
+    if (highPass != filterHighPass || std::abs (k - filterK) > 1.0e-9)
+    {
+        filterHighPass = highPass;
+        filterK        = k;
+        coefClosed     = -1.0;      // katsayilar bir sonraki sample'da yenilensin
+    }
+
+    filterStep = 1.0 / juce::jmax (1.0, sr * juce::jlimit (0.5, 200.0, smoothMs) * 0.001);
+}
+
+void GrossEngine::updateFilterCoefficients() noexcept
+{
+    const double hz = juce::jmin (FilterMap::cutoffHz (1.0 - filterClosed, filterHighPass), sr * 0.45);
+    const double g  = std::tan (juce::MathConstants<double>::pi * hz / sr);
+
+    fa1 = 1.0 / (1.0 + g * (g + filterK));
+    fa2 = g * fa1;
+    fa3 = g * fa2;
+
+    coefClosed = filterClosed;
 }
 
 void GrossEngine::setPhase (double newPhase) noexcept
@@ -236,6 +272,19 @@ void GrossEngine::processBlock (juce::AudioBuffer<float>& buffer,
                                 bool  volEnabled,
                                 float mix) noexcept
 {
+    // Filtre kapali: zarfi hic okunmaz, openFilter yalnizca yer tutucu
+    processBlock (buffer, timeEnv, volEnv, openFilter, timeEnabled, volEnabled, false, mix);
+}
+
+void GrossEngine::processBlock (juce::AudioBuffer<float>& buffer,
+                                const Envelope& timeEnv,
+                                const Envelope& volEnv,
+                                const Envelope& filterEnv,
+                                bool  timeEnabled,
+                                bool  volEnabled,
+                                bool  filterEnabled,
+                                float mix) noexcept
+{
     const int numSamples = buffer.getNumSamples();
     const int channels   = juce::jmin (numChannels, buffer.getNumChannels());
 
@@ -290,6 +339,32 @@ void GrossEngine::processBlock (juce::AudioBuffer<float>& buffer,
         const double wet  = smoothedMix.getNextValue();
         const double dry  = 1.0 - wet;
 
+        // Filtre: kapali lane'e gecilince de rampayla acilir.  Tamamen acik ve
+        // lane kapaliyken filtre hic calismaz ve durumu sifirlanir.
+        const double targetClosed = filterEnabled ? 1.0 - filterEnv.valueAt (phase, filterSegment) : 0.0;
+        filterClosed += juce::jlimit (-filterStep, filterStep, targetClosed - filterClosed);
+
+        const bool runFilter = filterEnabled || filterClosed > 0.0;
+
+        // Tam acikken filtre cikisi hic karismaz (bypass bit-bit seffaf); acilmanin
+        // ilk %3'unde filtreye yumusakca gecilir ki 20 kHz'lik kesim bile tik yapmasin.
+        double filterBlend = 0.0;
+
+        if (runFilter)
+        {
+            if (filterClosed != coefClosed)
+                updateFilterCoefficients();
+
+            filterBlend = juce::jmin (1.0, filterClosed / 0.03);
+        }
+        else if (coefClosed >= 0.0)
+        {
+            for (int c = 0; c < channels; ++c)
+                fIc1[c] = fIc2[c] = 0.0;
+
+            coefClosed = -1.0;
+        }
+
         // 3) kesirli okuma konumu
         //
         // Hermite 4 nokta kullanir ve okuma noktasindan 2 sample ILERIYE bakar.
@@ -330,7 +405,7 @@ void GrossEngine::processBlock (juce::AudioBuffer<float>& buffer,
         const int band = juce::jlimit (0, kSincBands - 1,
                                        (int) std::lround ((readSpeed - 1.0) * 4.0));
 
-        // 5) oku, gerekiyorsa iki kafayi esit guclu crossfade ile birlestir
+        // 5) oku, gerekiyorsa iki kafayi dogrusal crossfade ile birlestir
         double gOld = 0.0, gNew = 1.0;
 
         if (fadeCounter > 0)
@@ -348,8 +423,23 @@ void GrossEngine::processBlock (juce::AudioBuffer<float>& buffer,
             if (fadeCounter > 0)
                 wetSample = readSample (c, fadeReadPos, band) * gOld + wetSample * gNew;
 
+            wetSample *= gain;
+
+            if (runFilter)
+            {
+                const double v3 = wetSample - fIc2[c];
+                const double v1 = fa1 * fIc1[c] + fa2 * v3;
+                const double v2 = fIc2[c] + fa2 * fIc1[c] + fa3 * v3;
+
+                fIc1[c] = 2.0 * v1 - fIc1[c];
+                fIc2[c] = 2.0 * v2 - fIc2[c];
+
+                const double filtered = filterHighPass ? wetSample - filterK * v1 - v2 : v2;
+                wetSample += filterBlend * (filtered - wetSample);
+            }
+
             const double drySample = bufPtr[c][i];
-            bufPtr[c][i] = (float) (drySample * dry + wetSample * gain * wet);
+            bufPtr[c][i] = (float) (drySample * dry + wetSample * wet);
         }
 
         if (fadeCounter > 0)

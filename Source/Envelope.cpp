@@ -281,8 +281,12 @@ bool Envelope::isFlatAt (double value) const noexcept
 
 void Envelope::sortPoints()
 {
-    std::stable_sort (points.begin(), points.end(),
-                      [] (const EnvPoint& a, const EnvPoint& b) { return a.x < b.x; });
+    auto byX = [] (const EnvPoint& a, const EnvPoint& b) { return a.x < b.x; };
+
+    // Slottan / yayindan gelen noktalar zaten sirali.  stable_sort gecici bellek
+    // ayirabildigi icin ses thread'inde gereksiz yere cagirmayalim.
+    if (! std::is_sorted (points.begin(), points.end(), byX))
+        std::stable_sort (points.begin(), points.end(), byX);
 }
 
 int Envelope::addPoint (double x, double y, double tension, bool stepped)

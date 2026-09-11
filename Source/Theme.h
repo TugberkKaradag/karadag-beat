@@ -24,6 +24,8 @@ struct Theme
     juce::Colour textDim;
 
     juce::Colour playhead;
+
+    juce::Colour filterAccent;  // filtre zarfi - diger iki aksandan ayrisan ucuncu renk
 };
 
 namespace Themes

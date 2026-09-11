@@ -1,4 +1,5 @@
 #include "EnvelopeEditor.h"
+#include "FilterMap.h"
 #include "Theme.h"
 #include <cmath>
 
@@ -19,6 +20,25 @@ namespace
         return juce::String (whole) + " " + fractions[rest];
     }
 
+    /** 12000 -> "12k",  2400 -> "2.4k",  380 -> "380" */
+    juce::String hzToText (double hz)
+    {
+        if (hz >= 1000.0)
+        {
+            const double k = hz / 1000.0;
+            return (k >= 10.0 ? juce::String (juce::roundToInt (k))
+                              : juce::String (k, 1)) + "k";
+        }
+
+        return juce::String (juce::roundToInt (hz));
+    }
+
+    /** Arayuz cizgileri ve yazilari: paletin yazi rengi, verilen saydamlikta. */
+    juce::Colour ink (float alpha)
+    {
+        return Themes::current().text.withAlpha (alpha);
+    }
+
     // Iki zarf editoru arasinda paylasilan pano - time'dan kopyalayip
     // volume'a yapistirmak da mumkun, ilginc sonuclar veriyor.
     std::vector<EnvPoint> envelopeClipboard;
@@ -28,8 +48,8 @@ namespace
     constexpr float kPlotInset     = 2.0f;
 }
 
-EnvelopeEditor::EnvelopeEditor (Envelope& envelopeToEdit, bool isVolumeStyle)
-    : env (envelopeToEdit), volumeStyle (isVolumeStyle)
+EnvelopeEditor::EnvelopeEditor (Envelope& envelopeToEdit, Style laneStyle)
+    : env (envelopeToEdit), style (laneStyle), topIsOne (laneStyle != Style::time)
 {
     setOpaque (true);
     setMouseCursor (juce::MouseCursor::CrosshairCursor);
@@ -55,7 +75,7 @@ float EnvelopeEditor::xToPixel (double x) const noexcept
 
 float EnvelopeEditor::yToPixel (double y) const noexcept
 {
-    const double v = volumeStyle ? (1.0 - y) : y;
+    const double v = topIsOne ? (1.0 - y) : y;
     return plot.getY() + (float) v * plot.getHeight();
 }
 
@@ -73,7 +93,7 @@ double EnvelopeEditor::pixelToY (float py) const noexcept
         return 0.0;
 
     const double v = juce::jlimit (0.0, 1.0, (double) ((py - plot.getY()) / plot.getHeight()));
-    return volumeStyle ? (1.0 - v) : v;
+    return topIsOne ? (1.0 - v) : v;
 }
 
 double EnvelopeEditor::snapX (double x) const noexcept
@@ -89,8 +109,11 @@ double EnvelopeEditor::snapY (double y) const noexcept
     if (! snapEnabled)
         return y;
 
-    // Volume: 1/16'lik kademeler.  Time: 1/32 pattern = 1/16'lik nota kadar geri.
-    const double steps = volumeStyle ? 16.0 : 32.0;
+    // Volume: 1/16'lik kademeler.  Filtre: 24 kademe (~yarim oktav).
+    // Time: 1/32 pattern = 1/16'lik nota kadar geri.
+    const double steps = style == Style::volume ? 16.0
+                       : style == Style::filter ? 24.0
+                                                : 32.0;
     return juce::jlimit (0.0, 1.0, std::round (y * steps) / steps);
 }
 
@@ -249,6 +272,15 @@ void EnvelopeEditor::setPatternBars (int bars)
     }
 }
 
+void EnvelopeEditor::setFilterHighPass (bool highPass)
+{
+    if (highPass != filterHighPass)
+    {
+        filterHighPass = highPass;
+        repaint();
+    }
+}
+
 void EnvelopeEditor::setGridDivisions (int divisionsPerPattern)
 {
     divisions = juce::jmax (1, divisionsPerPattern);
@@ -357,7 +389,9 @@ void EnvelopeEditor::showContextMenu()
     // Menu kendi bakisini component'ten devralmiyor, elle vermek gerekiyor
     menu.setLookAndFeel (&getLookAndFeel());
 
-    menu.addSectionHeader (volumeStyle ? "Volume envelope" : "Time envelope");
+    menu.addSectionHeader (style == Style::volume ? "Volume envelope"
+                         : style == Style::filter ? "Filter envelope"
+                                                  : "Time envelope");
     menu.addItem (1, "Reset");
     menu.addItem (2, "Flip vertically");
     menu.addSeparator();
@@ -524,7 +558,7 @@ void EnvelopeEditor::mouseWheelMove (const juce::MouseEvent& e, const juce::Mous
 void EnvelopeEditor::drawGrid (juce::Graphics& g) const
 {
     // yatay cizgiler: 4 esit dilim
-    g.setColour (juce::Colours::white.withAlpha (0.06f));
+    g.setColour (ink (0.06f));
 
     for (int i = 1; i < 4; ++i)
     {
@@ -545,11 +579,11 @@ void EnvelopeEditor::drawGrid (juce::Graphics& g) const
         const bool isBeat = (i % perBeat == 0);
 
         if (isBar)
-            g.setColour (juce::Colours::white.withAlpha (0.28f));
+            g.setColour (ink (0.28f));
         else if (isBeat)
-            g.setColour (juce::Colours::white.withAlpha (0.13f));
+            g.setColour (ink (0.13f));
         else
-            g.setColour (juce::Colours::white.withAlpha (0.05f));
+            g.setColour (ink (0.05f));
 
         g.drawVerticalLine ((int) x, plot.getY(), plot.getBottom());
     }
@@ -570,7 +604,7 @@ void EnvelopeEditor::drawCurve (juce::Graphics& g) const
         if (i == 0)
         {
             curve.startNewSubPath (x, y);
-            fill .startNewSubPath (x, yToPixel (volumeStyle ? 0.0 : 0.0));
+            fill .startNewSubPath (x, yToPixel (0.0));
             fill .lineTo (x, y);
         }
         else
@@ -625,7 +659,7 @@ void EnvelopeEditor::drawWaveform (juce::Graphics& g) const
 
     wave.closeSubPath();
 
-    g.setColour (Themes::current().text.withAlpha (0.07f));
+    g.setColour (ink (0.07f));
     g.fillPath (wave);
 }
 
@@ -675,7 +709,7 @@ void EnvelopeEditor::drawPoints (juce::Graphics& g) const
         else
             g.fillEllipse (juce::Rectangle<float> (r * 2.2f, r * 2.2f).withCentre ({ x, y }));
 
-        g.setColour (active ? juce::Colours::white : accent.brighter (0.35f));
+        g.setColour (active ? Themes::current().text : accent.brighter (0.35f));
 
         if (p.stepped)
             g.fillRect (juce::Rectangle<float> (r * 1.6f, r * 1.6f).withCentre ({ x, y }));
@@ -696,9 +730,10 @@ void EnvelopeEditor::drawScale (juce::Graphics& g) const
         const double value = (double) i / (double) steps;
 
         // Time: 0 = canli, 1 = pattern boyu geride (bar cinsinden).  Volume: yuzde.
-        const juce::String text = volumeStyle
-            ? juce::String (juce::roundToInt (value * 100.0))
-            : barsToText (value * patternBars);
+        // Filtre: o yuksekligin kesim frekansi.
+        const juce::String text = style == Style::volume ? juce::String (juce::roundToInt (value * 100.0))
+                                : style == Style::filter ? hzToText (FilterMap::cutoffHz (value, filterHighPass))
+                                                         : barsToText (value * patternBars);
 
         // uc noktalardaki etiketler cizim alaninin disina tasmasin
         const float y = juce::jlimit (plot.getY() + 7.0f, plot.getBottom() - 7.0f,
@@ -706,7 +741,7 @@ void EnvelopeEditor::drawScale (juce::Graphics& g) const
         const auto row = juce::Rectangle<float> (scaleColumn.getX(), y - 7.0f,
                                                  scaleColumn.getWidth() - 5.0f, 14.0f);
 
-        g.setColour (juce::Colours::white.withAlpha (value == 0.0 ? 0.42f : 0.26f));
+        g.setColour (ink (value == 0.0 ? 0.42f : 0.26f));
         g.drawText (text, row, juce::Justification::centredRight);
     }
 
@@ -727,7 +762,7 @@ void EnvelopeEditor::drawRuler (juce::Graphics& g) const
         const float x = xToPixel ((double) k / (double) beats);
         const bool barStart = (k % 4 == 0);
 
-        g.setColour (juce::Colours::white.withAlpha (barStart ? 0.55f : 0.22f));
+        g.setColour (ink (barStart ? 0.55f : 0.22f));
         g.drawText (barStart ? juce::String (k / 4 + 1)
                              : juce::String (k / 4 + 1) + "." + juce::String (k % 4 + 1),
                     juce::Rectangle<float> (x + 3.0f, rulerRow.getY(), 40.0f, rulerRow.getHeight()),

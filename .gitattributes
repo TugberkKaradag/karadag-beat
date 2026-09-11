@@ -2,3 +2,6 @@
 * text=auto eol=lf
 
 *.png binary
+
+# Inno Setup betigi Windows araci; CRLF ile tutalim
+*.iss text eol=crlf

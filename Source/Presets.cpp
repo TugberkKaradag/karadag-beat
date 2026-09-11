@@ -229,7 +229,7 @@ std::vector<GrossPreset> Presets::makeDefaultSlots()
     slots.reserve ((size_t) kNumSlots);
 
     while ((int) slots.size() < kNumSlots)
-        slots.push_back ({ defaultDisplayName ((int) slots.size()), {}, {} });
+        slots.push_back ({ defaultDisplayName ((int) slots.size()), {}, {}, {} });
 
     return slots;
 }

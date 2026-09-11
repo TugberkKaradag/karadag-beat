@@ -18,7 +18,8 @@ namespace
             juce::Colour (0xffff3d9a),   // volume - sicak magenta
             juce::Colour (0xffe9e3f2),   // text
             juce::Colour (0xff8b829c),   // textDim
-            juce::Colour (0xfffff2c4)    // playhead
+            juce::Colour (0xfffff2c4),   // playhead
+            juce::Colour (0xff3de8ff)    // filter - elektrik camgobegi
         });
 
         // Sicak zemin, soguk aksan - cogu eklentinin tam tersi.
@@ -32,7 +33,8 @@ namespace
             juce::Colour (0xffffb020),   // volume - amber
             juce::Colour (0xfff0e2d6),
             juce::Colour (0xff9c8577),
-            juce::Colour (0xffffffff)
+            juce::Colour (0xffffffff),
+            juce::Colour (0xffff5a5f)    // filter - mercan
         });
 
         // Gece mavisi zemin, elektrik mor + asit sari.
@@ -46,7 +48,8 @@ namespace
             juce::Colour (0xffffe14d),   // volume - asit sari
             juce::Colour (0xffdfe0f5),
             juce::Colour (0xff7a7ca0),
-            juce::Colour (0xff00e5ff)
+            juce::Colour (0xff00e5ff),
+            juce::Colour (0xffff4fa3)    // filter - neon pembe
         });
 
         // Klor mavisi + neon turuncu, koyu petrol zemin.
@@ -60,7 +63,8 @@ namespace
             juce::Colour (0xffff8c42),   // volume - neon turuncu
             juce::Colour (0xffdff0ee),
             juce::Colour (0xff6f8a8c),
-            juce::Colour (0xffffffff)
+            juce::Colour (0xffffffff),
+            juce::Colour (0xffc6ff4a)    // filter - asit lime
         });
 
         // Kan portakali + soluk yesil, koyu bordo zemin.
@@ -74,7 +78,8 @@ namespace
             juce::Colour (0xffff4d2e),   // volume - kan portakali
             juce::Colour (0xfff2dfd9),
             juce::Colour (0xff97706a),
-            juce::Colour (0xffffe9b0)
+            juce::Colour (0xffffe9b0),
+            juce::Colour (0xffc9a8ff)    // filter - soluk lila
         });
 
         // Kirli lime + toz pembe, yosun zemin.
@@ -88,7 +93,8 @@ namespace
             juce::Colour (0xffe88ba0),   // volume - toz pembe
             juce::Colour (0xffe4ead9),
             juce::Colour (0xff7f8a72),
-            juce::Colour (0xfffff5d6)
+            juce::Colour (0xfffff5d6),
+            juce::Colour (0xff7cc6ff)    // filter - gok mavisi
         });
 
         // Soluk lila + asit sari, morarmis zemin.
@@ -102,7 +108,8 @@ namespace
             juce::Colour (0xffd4e04a),   // volume - asit sari
             juce::Colour (0xffe6e0f0),
             juce::Colour (0xff7d7391),
-            juce::Colour (0xffff9ecd)
+            juce::Colour (0xffff9ecd),
+            juce::Colour (0xff5ef2c2)    // filter - nane
         });
 
         // Sari + murekkep mavisi, notr beton zemin - brutalist.
@@ -116,7 +123,8 @@ namespace
             juce::Colour (0xff5b8cff),   // volume - murekkep mavisi
             juce::Colour (0xffe8e9ea),
             juce::Colour (0xff8a8d92),
-            juce::Colour (0xffffffff)
+            juce::Colour (0xffffffff),
+            juce::Colour (0xffff5a4a)    // filter - sinyal kirmizisi
         });
 
         return themes;

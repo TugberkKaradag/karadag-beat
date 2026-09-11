@@ -1,0 +1,83 @@
+# Her push'ta: derle, testleri calistir, pluginval ile dogrula, kurulum dosyasi uret.
+# Ciktilar (VST3 zip'i ve Setup.exe) calismanin "Artifacts" bolumunden indirilebilir.
+name: build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Surum
+        id: version
+        shell: pwsh
+        run: |
+          $m = Select-String -Path CMakeLists.txt -Pattern 'project\(KaradagBeat VERSION ([0-9.]+)'
+          $v = $m.Matches[0].Groups[1].Value
+          "value=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Surum $v"
+
+      # Yerel JUCE yolu runner'da yok; CMakeLists ayni surumu GitHub'dan ceker
+      - name: Yapilandir
+        run: cmake -S . -B build -A x64
+
+      - name: Testleri derle
+        run: cmake --build build --config Release --target DspTest StateTest --parallel
+
+      - name: DSP testleri
+        run: build\DspTest_artefacts\Release\DspTest.exe
+
+      - name: Proje durumu testleri
+        run: build\StateTest_artefacts\Release\StateTest.exe
+
+      - name: Eklentiyi derle
+        run: cmake --build build --config Release --target KaradagBeat_VST3 KaradagBeat_Standalone --parallel
+
+      - name: pluginval
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip -OutFile pluginval.zip
+          Expand-Archive pluginval.zip -DestinationPath pluginval
+          New-Item -ItemType Directory -Force pluginval-log | Out-Null
+          # pluginval bir GUI programi: PowerShell '&' ile cagirinca bitmesini beklemez
+          # ve cikis kodu bos kalir.  Start-Process -Wait ile bekleyip kodu aliyoruz.
+          $plugin = Resolve-Path "build\KaradagBeat_artefacts\Release\VST3\Karadag Beat.vst3"
+          $p = Start-Process -FilePath .\pluginval\pluginval.exe -Wait -PassThru -NoNewWindow `
+                 -RedirectStandardOutput pluginval-log\pluginval.txt `
+                 -ArgumentList @("--strictness-level", "10", "--validate-in-process",
+                                 "--timeout-ms", "600000", "`"$plugin`"")
+          Get-Content pluginval-log\pluginval.txt
+          if ($p.ExitCode -ne 0) { throw "pluginval basarisiz (cikis kodu $($p.ExitCode))" }
+
+      - name: Kurulum dosyasi
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=${{ steps.version.outputs.value }}" installer\KaradagBeat.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup basarisiz" }
+
+      - name: VST3 zip
+        shell: pwsh
+        run: Compress-Archive -Path "build\KaradagBeat_artefacts\Release\VST3\Karadag Beat.vst3" -DestinationPath "KaradagBeat-${{ steps.version.outputs.value }}-VST3.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KaradagBeat-${{ steps.version.outputs.value }}
+          path: |
+            build/installer/*.exe
+            KaradagBeat-*-VST3.zip
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pluginval-log
+          path: pluginval-log
+          if-no-files-found: ignore

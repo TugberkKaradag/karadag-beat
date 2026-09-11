@@ -4,12 +4,13 @@
 #include <vector>
 
 /**
-    Tek bir zarf (envelope) egrisi: 2 bar'lik pattern boyunca 0..1 arasi bir deger uretir.
+    Tek bir zarf (envelope) egrisi: pattern boyunca (1, 2 ya da 4 bar) 0..1 arasi bir deger uretir.
 
-    x  : pattern icindeki konum, 0..1  (0 = pattern basi, 1 = 2 bar sonrasi / pattern sonu)
+    x  : pattern icindeki konum, 0..1  (0 = pattern basi, 1 = pattern sonu)
     y  : degerin kendisi, 0..1
-         - Time zarfinda  : 0 = canli ses (gecikme yok), 1 = 2 bar geride
+         - Time zarfinda  : 0 = canli ses (gecikme yok), 1 = bir pattern boyu geride
          - Volume zarfinda: 0 = sessiz, 1 = tam ses
+         - Filtre zarfinda: 0 = tamamen kapali, 1 = acik (bkz. FilterMap.h)
 
     Her nokta, KENDISINDEN SONRAKI segmentin seklini tasir:
       stepped == true  -> bir sonraki noktaya kadar degeri sabit tutar (basamak)

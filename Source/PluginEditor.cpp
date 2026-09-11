@@ -10,6 +10,8 @@ namespace
         "click  add / move      right-click  delete      double-click  step      drag o  bend curve"
         "      alt-drag or DRAW  paint steps      shift  free      notes from C4  trigger";
 
+    const char* const kVolumeLabel = "VOLUME   gate, sidechain, pump";
+
     /** Pattern dosyalarinin varsayilan klasoru. */
     juce::File patternFolder()
     {
@@ -26,6 +28,12 @@ namespace
                  + (bars == 1 ? " bar back" : " bars back");
     }
 
+    juce::String filterLabelText (bool highPass)
+    {
+        return highPass ? "FILTER   high-pass   top: open   bottom: thin"
+                        : "FILTER   low-pass   top: open   bottom: dark";
+    }
+
     void styleLabel (juce::Label& label, const juce::String& text,
                      float fontHeight, juce::Colour colour,
                      juce::Justification just = juce::Justification::centredLeft)
@@ -34,6 +42,24 @@ namespace
         label.setFont (juce::FontOptions (fontHeight, juce::Font::bold));
         label.setColour (juce::Label::textColourId, colour);
         label.setJustificationType (just);
+    }
+
+    /** Zincir adimi secicisi: id 1 = cizim, id 2.. = slotlar. */
+    constexpr int kDrawingItemId = 1;
+
+    void fillSlotChoices (juce::ComboBox& box, const KaradagBeatProcessor& processor)
+    {
+        box.clear (juce::dontSendNotification);
+        box.addItem ("Drawing", kDrawingItemId);
+        box.addSeparator();
+
+        for (int i = 0; i < Presets::kNumSlots; ++i)
+        {
+            if (i == Presets::numPresets())
+                box.addSeparator();
+
+            box.addItem (juce::String (i + 1) + " " + processor.getSlotName (i), i + 2);
+        }
     }
 }
 
@@ -65,6 +91,9 @@ void BeatLookAndFeel::refreshFromTheme()
     setColour (juce::TextEditor::highlightColourId,   th().timeAccent.withAlpha (0.3f));
     setColour (juce::TextButton::buttonColourId,      th().panel);
     setColour (juce::TextButton::textColourOffId,     th().text);
+    setColour (juce::Label::textColourId,             th().text);
+    setColour (juce::BubbleComponent::backgroundColourId, th().panel);
+    setColour (juce::BubbleComponent::outlineColourId,    th().edge);
 }
 
 void BeatLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height,
@@ -80,7 +109,7 @@ void BeatLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int wid
 
     juce::Path back;
     back.addCentredArc (centre.x, centre.y, arcR, arcR, 0.0f, startAngle, endAngle, true);
-    g.setColour (juce::Colours::white.withAlpha (0.12f));
+    g.setColour (th().text.withAlpha (0.12f));
     g.strokePath (back, juce::PathStrokeType (lineW, juce::PathStrokeType::curved,
                                               juce::PathStrokeType::rounded));
 
@@ -92,7 +121,7 @@ void BeatLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int wid
 
     juce::Point<float> tip (centre.x + arcR * std::sin (angle),
                             centre.y - arcR * std::cos (angle));
-    g.setColour (juce::Colours::white);
+    g.setColour (th().text);
     g.fillEllipse (juce::Rectangle<float> (lineW * 1.1f, lineW * 1.1f).withCentre (tip));
 }
 
@@ -103,10 +132,10 @@ void BeatLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& b
     const bool on = button.getToggleState();
     const auto accent = button.findColour (juce::TextButton::buttonOnColourId);
 
-    g.setColour (on ? accent.withAlpha (0.22f) : juce::Colours::white.withAlpha (0.05f));
+    g.setColour (on ? accent.withAlpha (0.22f) : th().text.withAlpha (0.05f));
     g.fillRoundedRectangle (bounds, 4.0f);
 
-    g.setColour (on ? accent : juce::Colours::white.withAlpha (shouldDrawHighlighted ? 0.35f : 0.18f));
+    g.setColour (on ? accent : th().text.withAlpha (shouldDrawHighlighted ? 0.35f : 0.18f));
     g.drawRoundedRectangle (bounds, 4.0f, 1.2f);
 
     g.setColour (on ? accent.brighter (0.3f) : th().text.withAlpha (0.55f));
@@ -124,44 +153,172 @@ void ThemeButton::paintButton (juce::Graphics& g, bool shouldDrawHighlighted, bo
 {
     const auto bounds = getLocalBounds().toFloat().reduced (1.0f);
 
-    g.setColour (juce::Colours::white.withAlpha (shouldDrawHighlighted ? 0.09f : 0.05f));
+    g.setColour (th().text.withAlpha (shouldDrawHighlighted ? 0.09f : 0.05f));
     g.fillRoundedRectangle (bounds, 4.0f);
 
     g.setColour (th().edge);
     g.drawRoundedRectangle (bounds, 4.0f, 1.0f);
 
-    const float r = 4.6f;
+    const float r = 4.2f;
     const auto c = bounds.getCentre();
 
     g.setColour (th().timeAccent);
-    g.fillEllipse (juce::Rectangle<float> (r, r).withCentre ({ c.x - 3.6f, c.y }));
+    g.fillEllipse (juce::Rectangle<float> (r, r).withCentre ({ c.x - 5.2f, c.y }));
 
     g.setColour (th().volumeAccent);
-    g.fillEllipse (juce::Rectangle<float> (r, r).withCentre ({ c.x + 3.6f, c.y }));
+    g.fillEllipse (juce::Rectangle<float> (r, r).withCentre ({ c.x, c.y }));
+
+    g.setColour (th().filterAccent);
+    g.fillEllipse (juce::Rectangle<float> (r, r).withCentre ({ c.x + 5.2f, c.y }));
+}
+
+//==============================================================================
+ChainPanel::ChainPanel (KaradagBeatProcessor& p)  : processor (p)
+{
+    styleLabel (title, "PATTERN CHAIN   one step per pattern loop", 10.5f, th().timeAccent.withAlpha (0.85f));
+    styleLabel (lengthLabel, "STEPS", 9.5f, th().textDim, juce::Justification::centredRight);
+    addAndMakeVisible (title);
+    addAndMakeVisible (lengthLabel);
+
+    enableToggle.setColour (juce::TextButton::buttonOnColourId, th().timeAccent);
+    enableToggle.setTooltip ("Play the steps in order, one per pattern loop.  MIDI notes still win.");
+    addAndMakeVisible (enableToggle);
+    enableAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+                       processor.apvts, "chainOn", enableToggle);
+
+    for (int i = 1; i <= KaradagBeatProcessor::kMaxChainSteps; ++i)
+        lengthBox.addItem (juce::String (i), i);
+
+    lengthBox.setSelectedId (processor.getChainLength(), juce::dontSendNotification);
+    lengthBox.onChange = [this]
+    {
+        processor.setChainLength (lengthBox.getSelectedId());
+        refreshEnabledSteps();
+    };
+    addAndMakeVisible (lengthBox);
+
+    for (int i = 0; i < KaradagBeatProcessor::kMaxChainSteps; ++i)
+    {
+        auto& box = stepBoxes[(size_t) i];
+        fillSlotChoices (box, processor);
+
+        const int value = processor.getChainStep (i);
+        box.setSelectedId (value < 0 ? kDrawingItemId : value + 2, juce::dontSendNotification);
+
+        box.onChange = [this, i]
+        {
+            const int id = stepBoxes[(size_t) i].getSelectedId();
+            processor.setChainStep (i, id == kDrawingItemId ? KaradagBeatProcessor::kChainDrawing : id - 2);
+        };
+
+        box.setTooltip ("\"Drawing\" plays what is drawn in the editor");
+        addAndMakeVisible (box);
+
+        styleLabel (stepLabels[(size_t) i], juce::String (i + 1), 11.0f, th().textDim,
+                    juce::Justification::centredRight);
+        addAndMakeVisible (stepLabels[(size_t) i]);
+    }
+
+    refreshEnabledSteps();
+    setSize (470, 186);
+    startTimerHz (15);
+}
+
+void ChainPanel::refreshEnabledSteps()
+{
+    const int length = processor.getChainLength();
+
+    for (int i = 0; i < KaradagBeatProcessor::kMaxChainSteps; ++i)
+    {
+        stepBoxes [(size_t) i].setEnabled (i < length);
+        stepLabels[(size_t) i].setAlpha (i < length ? 1.0f : 0.35f);
+    }
+}
+
+void ChainPanel::timerCallback()
+{
+    // Calan adim vurgulansin
+    const int active = processor.getActiveChainStep();
+
+    if (active != lastActiveStep)
+    {
+        lastActiveStep = active;
+
+        for (int i = 0; i < KaradagBeatProcessor::kMaxChainSteps; ++i)
+            stepLabels[(size_t) i].setColour (juce::Label::textColourId,
+                                              i == active ? th().timeAccent : th().textDim);
+    }
+}
+
+void ChainPanel::paint (juce::Graphics& g)
+{
+    g.fillAll (th().panel);
+}
+
+void ChainPanel::resized()
+{
+    auto area = getLocalBounds().reduced (12, 10);
+
+    auto header = area.removeFromTop (24);
+    enableToggle.setBounds (header.removeFromRight (86).reduced (0, 1));
+    header.removeFromRight (10);
+    lengthBox  .setBounds (header.removeFromRight (52).reduced (0, 1));
+    lengthLabel.setBounds (header.removeFromRight (44));
+    title.setBounds (header);
+
+    area.removeFromTop (10);
+
+    const int rows = KaradagBeatProcessor::kMaxChainSteps / 2;
+    const int rowHeight = area.getHeight() / rows;
+    const int columnWidth = area.getWidth() / 2;
+
+    for (int i = 0; i < KaradagBeatProcessor::kMaxChainSteps; ++i)
+    {
+        const int column = i / rows;
+        const int row    = i % rows;
+
+        auto cell = juce::Rectangle<int> (area.getX() + column * columnWidth,
+                                          area.getY() + row * rowHeight,
+                                          columnWidth, rowHeight).reduced (4, 3);
+
+        stepLabels[(size_t) i].setBounds (cell.removeFromLeft (20));
+        cell.removeFromLeft (6);
+        stepBoxes[(size_t) i].setBounds (cell);
+    }
 }
 
 //==============================================================================
 KaradagBeatEditor::KaradagBeatEditor (KaradagBeatProcessor& p)
     : AudioProcessorEditor (&p),
       processor (p),
-      timeEditor   (p.getEditableTimeEnvelope(),   false),
-      volumeEditor (p.getEditableVolumeEnvelope(), true)
+      timeEditor   (p.getEditableTimeEnvelope(),   EnvelopeEditor::Style::time),
+      volumeEditor (p.getEditableVolumeEnvelope(), EnvelopeEditor::Style::volume),
+      filterEditor (p.getEditableFilterEnvelope(), EnvelopeEditor::Style::filter)
 {
     setLookAndFeel (&lookAndFeel);
 
-    // --- zarf editorleri ---
-    timeEditor.setAccentColour (th().timeAccent);
-    volumeEditor.setAccentColour (th().volumeAccent);
+    // --- zarf editorleri ve lane basliklari ---
     timeEditor.setShowRuler (true);
 
-    timeEditor.onChange   = [this] { processor.publishEnvelopes(); };
-    volumeEditor.onChange = [this] { processor.publishEnvelopes(); };
+    setupLane (timeLane, timeEditor, p.getEditableTimeEnvelope(), "TIME",
+               "Crossfade length at time jumps  -  longer gives washier stutters");
+    setupLane (volLane, volumeEditor, p.getEditableVolumeEnvelope(), "VOLUME",
+               "How fast the volume may change  -  longer turns hard gates into a soft tremolo");
+    setupLane (filterLane, filterEditor, p.getEditableFilterEnvelope(), "FILTER",
+               "How fast the cutoff may move  -  longer gives smooth sweeps from steps");
 
-    timeEditor.onEditBegin   = [this] { pushUndoStep(); };
-    volumeEditor.onEditBegin = [this] { pushUndoStep(); };
+    timeLane  .toggle.setTooltip ("Enable the time envelope");
+    volLane   .toggle.setTooltip ("Enable the volume envelope");
+    filterLane.toggle.setTooltip ("Enable the filter envelope  (fully open = no filtering at all)");
 
-    addAndMakeVisible (timeEditor);
-    addAndMakeVisible (volumeEditor);
+    filterTypeBox.addItemList ({ "LP", "HP" }, 1);
+    filterTypeBox.setTooltip ("Low-pass darkens, high-pass thins out");
+    addAndMakeVisible (filterTypeBox);
+
+    filterResoSlider.setTooltip ("Filter resonance");
+    filterResoSlider.setPopupDisplayEnabled (true, true, this);
+    addAndMakeVisible (filterResoSlider);
+    addAndMakeVisible (filterResoLabel);
 
     // --- pattern slotu secici ---
     // Baslik ve ayiricilarin ID'si 0; ComboBox indeksleri yalnizca gercek ogeleri
@@ -181,6 +338,11 @@ KaradagBeatEditor::KaradagBeatEditor (KaradagBeatProcessor& p)
     }
     refreshSlotNames();
 
+    // Baglanti onChange'den ONCE kurulmali: kurulurken kutuyu parametreye esitler
+    // ve bunu bildirimle yapar.  onChange o sirada bagli olsaydi pencere her
+    // acildiginda secili slot editore yuklenir, kaydedilmemis cizim silinirdi.
+    presetAttach = std::make_unique<APVTS::ComboBoxAttachment> (processor.apvts, "preset", presetBox);
+
     presetBox.onChange = [this]
     {
         const int index = presetBox.getSelectedItemIndex();
@@ -189,15 +351,12 @@ KaradagBeatEditor::KaradagBeatEditor (KaradagBeatProcessor& p)
         {
             pushUndoStep();          // slot yuklenmeden onceki cizim geri alinabilsin
             processor.loadSlotIntoEditor (index);
-            timeEditor.envelopeChangedExternally();
-            volumeEditor.envelopeChangedExternally();
+            refreshAllEditors();
         }
     };
     addAndMakeVisible (presetBox);
 
     // --- kullanici slotuna kaydet ---
-    saveButton.setColour (juce::TextButton::buttonColourId, th().panel);
-    saveButton.setColour (juce::TextButton::textColourOffId, th().text.withAlpha (0.8f));
     saveButton.onClick = [this] { promptSaveToSlot(); };
     addAndMakeVisible (saveButton);
 
@@ -205,66 +364,21 @@ KaradagBeatEditor::KaradagBeatEditor (KaradagBeatProcessor& p)
     // Klavye kisayoluna guvenemiyoruz: host (ozellikle FL) Ctrl+Z'yi kendi
     // geri almasi icin yakalayabiliyor.  Gorunur dugmeler her yerde calisir.
     for (auto* b : { &undoButton, &redoButton })
-    {
-        b->setColour (juce::TextButton::buttonColourId, th().panel);
-        b->setColour (juce::TextButton::textColourOffId, th().text.withAlpha (0.85f));
         addAndMakeVisible (b);
-    }
 
     undoButton.setTooltip ("Undo  (Ctrl+Z)");
     redoButton.setTooltip ("Redo  (Ctrl+Shift+Z)");
     saveButton.setTooltip ("Store the drawn envelopes in a user slot");
     presetBox .setTooltip ("Pattern slot  -  1-21 factory, 22-48 your own");
     snapBox   .setTooltip ("Grid the points snap to  (hold Shift to drag freely)");
-    midiToggle.setTooltip ("Trigger patterns from notes, starting at C4");
     mixSlider .setTooltip ("Blend between the dry input and the processed signal");
-    timeToggle.setTooltip ("Enable the time envelope");
-    volToggle .setTooltip ("Enable the volume envelope");
+
     themeButton.onClick = [this] { showThemeMenu(); };
     addAndMakeVisible (themeButton);
 
     fileButton.setTooltip ("Export or import a pattern file (.kbeat)");
     fileButton.onClick = [this] { showFileMenu(); };
     addAndMakeVisible (fileButton);
-
-    latchToggle.setTooltip ("Latch: a note switches its pattern on until the same note is played again");
-    addAndMakeVisible (latchToggle);
-
-    for (auto* t : { &timeDrawToggle, &volDrawToggle })
-    {
-        t->setTooltip ("Paint steps into grid cells  (or hold Alt while dragging)");
-        addAndMakeVisible (t);
-    }
-
-    timeDrawToggle.onClick = [this] { timeEditor  .setDrawMode (timeDrawToggle.getToggleState()); };
-    volDrawToggle .onClick = [this] { volumeEditor.setDrawMode (volDrawToggle .getToggleState()); };
-
-    timeShiftLeft .onClick = [this] { shiftLane (timeEditor,   processor.getEditableTimeEnvelope(),   -1); };
-    timeShiftRight.onClick = [this] { shiftLane (timeEditor,   processor.getEditableTimeEnvelope(),   +1); };
-    volShiftLeft  .onClick = [this] { shiftLane (volumeEditor, processor.getEditableVolumeEnvelope(), -1); };
-    volShiftRight .onClick = [this] { shiftLane (volumeEditor, processor.getEditableVolumeEnvelope(), +1); };
-
-    for (auto* b : { &timeShiftLeft, &volShiftLeft })
-        b->setTooltip ("Shift this lane one grid step earlier");
-
-    for (auto* b : { &timeShiftRight, &volShiftRight })
-        b->setTooltip ("Shift this lane one grid step later");
-
-    for (auto* b : { &timeShiftLeft, &timeShiftRight, &volShiftLeft, &volShiftRight })
-        addAndMakeVisible (b);
-
-    // --- yumusatma ---
-    timeSmoothSlider.setTooltip ("Crossfade length at time jumps  -  longer gives washier stutters");
-    volSmoothSlider .setTooltip ("How fast the volume may change  -  longer turns hard gates into a soft tremolo");
-
-    for (auto* sl : { &timeSmoothSlider, &volSmoothSlider })
-    {
-        sl->setPopupDisplayEnabled (true, true, this);
-        addAndMakeVisible (sl);
-    }
-
-    for (auto* l : { &timeSmoothLabel, &volSmoothLabel })
-        addAndMakeVisible (l);
 
     undoButton.onClick = [this] { undo(); };
     redoButton.onClick = [this] { redo(); };
@@ -287,41 +401,55 @@ KaradagBeatEditor::KaradagBeatEditor (KaradagBeatProcessor& p)
     barsBox.onChange = [this] { refreshGrid(); };
     addAndMakeVisible (barsBox);
 
-    // --- dugmeler ---
-    timeToggle.setColour (juce::TextButton::buttonOnColourId, th().timeAccent);
-    volToggle .setColour (juce::TextButton::buttonOnColourId, th().volumeAccent);
-    midiToggle.setColour (juce::TextButton::buttonOnColourId, th().timeAccent);
-
-    for (auto* b : { &timeToggle, &volToggle, &midiToggle })
-        addAndMakeVisible (b);
-
     mixSlider.setRange (0.0, 1.0, 0.001);
     addAndMakeVisible (mixSlider);
+    addAndMakeVisible (mixLabel);
 
-    // --- etiketler ---
-    styleLabel (timeLabel,  timeLabelText (2), 10.5f, th().timeAccent.withAlpha (0.75f));
-    styleLabel (volLabel,   "VOLUME   gate, sidechain, pump", 10.5f, th().volumeAccent.withAlpha (0.75f));
-    styleLabel (mixLabel,   "MIX", 9.5f, th().textDim, juce::Justification::centred);
-    styleLabel (hintLabel, kHintText, 10.0f, th().textDim.withAlpha (0.85f));
-    hintLabel.setFont (juce::FontOptions (10.0f));
+    // --- alt bar: MIDI, zincir, swing ---
+    midiToggle  .setTooltip ("Trigger patterns from notes, starting at C4");
+    latchToggle .setTooltip ("Latch: a note switches its pattern on until the same note is played again");
+    retrigToggle.setTooltip ("Retrigger: every note restarts its pattern from the beginning  -  "
+                             "tape stops and scratches land exactly on the note");
+    chainToggle .setTooltip ("Chain: play a sequence of patterns, one per pattern loop");
+    chainEditButton.setTooltip ("Edit the chain");
+    chainEditButton.onClick = [this] { showChainPanel(); };
 
-    for (auto* l : { &timeLabel, &volLabel, &hintLabel, &mixLabel })
-        addAndMakeVisible (l);
+    for (auto* b : std::initializer_list<juce::Component*> { &midiToggle, &latchToggle, &retrigToggle,
+                                                             &chainToggle, &chainEditButton })
+        addAndMakeVisible (b);
+
+    swingSlider.setTooltip ("Swing: pushes every second 1/16 later  -  50 % is straight  (double-click resets)");
+    swingSlider.setPopupDisplayEnabled (true, true, this);
+    swingSlider.setDoubleClickReturnValue (true, 50.0);
+    addAndMakeVisible (swingSlider);
+    addAndMakeVisible (swingLabel);
+
+    hintLabel.setInterceptsMouseClicks (false, false);
+    addAndMakeVisible (hintLabel);
 
     // --- parametre baglantilari ---
-    presetAttach = std::make_unique<APVTS::ComboBoxAttachment> (processor.apvts, "preset", presetBox);
-    barsAttach   = std::make_unique<APVTS::ComboBoxAttachment> (processor.apvts, "patternBars", barsBox);
-    timeAttach   = std::make_unique<APVTS::ButtonAttachment>   (processor.apvts, "timeOn", timeToggle);
-    volAttach    = std::make_unique<APVTS::ButtonAttachment>   (processor.apvts, "volOn", volToggle);
-    midiAttach   = std::make_unique<APVTS::ButtonAttachment>   (processor.apvts, "midiTrigger", midiToggle);
-    latchAttach  = std::make_unique<APVTS::ButtonAttachment>   (processor.apvts, "midiLatch", latchToggle);
-    mixAttach    = std::make_unique<APVTS::SliderAttachment>   (processor.apvts, "mix", mixSlider);
+    barsAttach       = std::make_unique<APVTS::ComboBoxAttachment> (processor.apvts, "patternBars", barsBox);
+    filterTypeAttach = std::make_unique<APVTS::ComboBoxAttachment> (processor.apvts, "filterType", filterTypeBox);
 
-    timeSmoothAttach = std::make_unique<APVTS::SliderAttachment> (processor.apvts, "timeSmooth", timeSmoothSlider);
-    volSmoothAttach  = std::make_unique<APVTS::SliderAttachment> (processor.apvts, "volSmooth",  volSmoothSlider);
+    timeAttach   = std::make_unique<APVTS::ButtonAttachment> (processor.apvts, "timeOn",        timeLane.toggle);
+    volAttach    = std::make_unique<APVTS::ButtonAttachment> (processor.apvts, "volOn",         volLane.toggle);
+    filterAttach = std::make_unique<APVTS::ButtonAttachment> (processor.apvts, "filterOn",      filterLane.toggle);
+    midiAttach   = std::make_unique<APVTS::ButtonAttachment> (processor.apvts, "midiTrigger",   midiToggle);
+    latchAttach  = std::make_unique<APVTS::ButtonAttachment> (processor.apvts, "midiLatch",     latchToggle);
+    retrigAttach = std::make_unique<APVTS::ButtonAttachment> (processor.apvts, "midiRetrigger", retrigToggle);
+    chainAttach  = std::make_unique<APVTS::ButtonAttachment> (processor.apvts, "chainOn",       chainToggle);
 
-    for (auto* sl : { &timeSmoothSlider, &volSmoothSlider })
+    mixAttach          = std::make_unique<APVTS::SliderAttachment> (processor.apvts, "mix",          mixSlider);
+    swingAttach        = std::make_unique<APVTS::SliderAttachment> (processor.apvts, "swing",        swingSlider);
+    filterResoAttach   = std::make_unique<APVTS::SliderAttachment> (processor.apvts, "filterReso",   filterResoSlider);
+    timeSmoothAttach   = std::make_unique<APVTS::SliderAttachment> (processor.apvts, "timeSmooth",   timeLane.smooth);
+    volSmoothAttach    = std::make_unique<APVTS::SliderAttachment> (processor.apvts, "volSmooth",    volLane.smooth);
+    filterSmoothAttach = std::make_unique<APVTS::SliderAttachment> (processor.apvts, "filterSmooth", filterLane.smooth);
+
+    for (auto* sl : { &timeLane.smooth, &volLane.smooth, &filterLane.smooth })
         sl->setTextValueSuffix (" ms");
+
+    swingSlider.setTextValueSuffix (" %");
 
     Themes::loadPreference();
     applyThemeColours();
@@ -329,9 +457,9 @@ KaradagBeatEditor::KaradagBeatEditor (KaradagBeatProcessor& p)
 
     setWantsKeyboardFocus (true);
 
-    setSize (1040, 600);
+    setSize (1040, 720);
     setResizable (true, true);
-    setResizeLimits (1000, 480, 1800, 1150);
+    setResizeLimits (1000, 600, 1800, 1250);
 
     startTimerHz (30);
 }
@@ -339,6 +467,34 @@ KaradagBeatEditor::KaradagBeatEditor (KaradagBeatProcessor& p)
 KaradagBeatEditor::~KaradagBeatEditor()
 {
     setLookAndFeel (nullptr);
+}
+
+void KaradagBeatEditor::setupLane (LaneControls& lane, EnvelopeEditor& editor, Envelope& env,
+                                   const juce::String& toggleText, const juce::String& smoothTooltip)
+{
+    editor.onChange    = [this] { processor.publishEnvelopes(); };
+    editor.onEditBegin = [this] { pushUndoStep(); };
+    addAndMakeVisible (editor);
+
+    lane.toggle.setButtonText (toggleText);
+    addAndMakeVisible (lane.toggle);
+    addAndMakeVisible (lane.label);
+
+    lane.smooth.setTooltip (smoothTooltip);
+    lane.smooth.setPopupDisplayEnabled (true, true, this);
+    addAndMakeVisible (lane.smooth);
+    addAndMakeVisible (lane.smoothLabel);
+
+    lane.shiftLeft .setTooltip ("Shift this lane one grid step earlier");
+    lane.shiftRight.setTooltip ("Shift this lane one grid step later");
+    lane.shiftLeft .onClick = [this, &editor, &env] { shiftLane (editor, env, -1); };
+    lane.shiftRight.onClick = [this, &editor, &env] { shiftLane (editor, env, +1); };
+    addAndMakeVisible (lane.shiftLeft);
+    addAndMakeVisible (lane.shiftRight);
+
+    lane.draw.setTooltip ("Paint steps into grid cells  (or hold Alt while dragging)");
+    lane.draw.onClick = [&lane, &editor] { editor.setDrawMode (lane.draw.getToggleState()); };
+    addAndMakeVisible (lane.draw);
 }
 
 //==============================================================================
@@ -361,17 +517,25 @@ namespace
 KaradagBeatEditor::EnvelopeSnapshot KaradagBeatEditor::captureSnapshot() const
 {
     return { processor.getEditableTimeEnvelope().getPoints(),
-             processor.getEditableVolumeEnvelope().getPoints() };
+             processor.getEditableVolumeEnvelope().getPoints(),
+             processor.getEditableFilterEnvelope().getPoints() };
 }
 
 void KaradagBeatEditor::applySnapshot (const EnvelopeSnapshot& snapshot)
 {
     processor.getEditableTimeEnvelope()  .setPoints (snapshot.time);
     processor.getEditableVolumeEnvelope().setPoints (snapshot.volume);
+    processor.getEditableFilterEnvelope().setPoints (snapshot.filter);
     processor.publishEnvelopes();
 
-    timeEditor.envelopeChangedExternally();
+    refreshAllEditors();
+}
+
+void KaradagBeatEditor::refreshAllEditors()
+{
+    timeEditor  .envelopeChangedExternally();
     volumeEditor.envelopeChangedExternally();
+    filterEditor.envelopeChangedExternally();
 }
 
 void KaradagBeatEditor::pushUndoStep()
@@ -381,8 +545,9 @@ void KaradagBeatEditor::pushUndoStep()
     // Ayni durumu iki kez ust uste yigmayalim - tekerlek gibi hizli
     // tekrarlanan olaylar yigini gereksizce doldurmasin
     if (! undoStack.empty()
-        && samePoints (undoStack.back().time, snapshot.time)
-        && samePoints (undoStack.back().volume, snapshot.volume))
+        && samePoints (undoStack.back().time,   snapshot.time)
+        && samePoints (undoStack.back().volume, snapshot.volume)
+        && samePoints (undoStack.back().filter, snapshot.filter))
         return;
 
     undoStack.push_back (std::move (snapshot));
@@ -454,51 +619,64 @@ void KaradagBeatEditor::refreshGrid()
     const int barCount  = bars[juce::jlimit (0, 2, barsBox.getSelectedItemIndex())];
     const int divisions = barCount * perBar[juce::jlimit (0, 5, snapBox.getSelectedId() - 1)];
 
-    for (auto* e : { &timeEditor, &volumeEditor })
+    for (auto* e : { &timeEditor, &volumeEditor, &filterEditor })
     {
         e->setPatternBars (barCount);
         e->setGridDivisions (divisions);
     }
 
-    timeLabel.setText (timeLabelText (barCount), juce::dontSendNotification);
+    timeLane.label.setText (timeLabelText (barCount), juce::dontSendNotification);
 }
 
 void KaradagBeatEditor::applyThemeColours()
 {
     lookAndFeel.refreshFromTheme();
 
-    timeEditor  .setAccentColour (th().timeAccent);
-    volumeEditor.setAccentColour (th().volumeAccent);
+    struct LaneColour { LaneControls* lane; EnvelopeEditor* editor; juce::Colour accent; };
 
-    timeToggle.setColour (juce::TextButton::buttonOnColourId, th().timeAccent);
-    volToggle .setColour (juce::TextButton::buttonOnColourId, th().volumeAccent);
-    midiToggle.setColour (juce::TextButton::buttonOnColourId, th().timeAccent);
-    latchToggle.setColour (juce::TextButton::buttonOnColourId, th().timeAccent);
-    timeDrawToggle.setColour (juce::TextButton::buttonOnColourId, th().timeAccent);
-    volDrawToggle .setColour (juce::TextButton::buttonOnColourId, th().volumeAccent);
+    const LaneColour lanes[] = { { &timeLane,   &timeEditor,   th().timeAccent   },
+                                 { &volLane,    &volumeEditor, th().volumeAccent },
+                                 { &filterLane, &filterEditor, th().filterAccent } };
 
-    timeSmoothSlider.setColour (juce::Slider::trackColourId, th().timeAccent.withAlpha (0.8f));
-    timeSmoothSlider.setColour (juce::Slider::thumbColourId, th().timeAccent);
-    volSmoothSlider .setColour (juce::Slider::trackColourId, th().volumeAccent.withAlpha (0.8f));
-    volSmoothSlider .setColour (juce::Slider::thumbColourId, th().volumeAccent);
+    for (const auto& l : lanes)
+    {
+        l.editor->setAccentColour (l.accent);
+        l.lane->toggle.setColour (juce::TextButton::buttonOnColourId, l.accent);
+        l.lane->draw  .setColour (juce::TextButton::buttonOnColourId, l.accent);
 
-    for (auto* sl : { &timeSmoothSlider, &volSmoothSlider })
-        sl->setColour (juce::Slider::backgroundColourId, juce::Colours::white.withAlpha (0.08f));
+        l.lane->smooth.setColour (juce::Slider::trackColourId, l.accent.withAlpha (0.8f));
+        l.lane->smooth.setColour (juce::Slider::thumbColourId, l.accent);
+        l.lane->smooth.setColour (juce::Slider::backgroundColourId, th().text.withAlpha (0.08f));
 
-    styleLabel (timeSmoothLabel, "SMOOTH", 9.5f, th().textDim, juce::Justification::centredRight);
-    styleLabel (volSmoothLabel,  "SMOOTH", 9.5f, th().textDim, juce::Justification::centredRight);
+        styleLabel (l.lane->smoothLabel, "SMOOTH", 9.5f, th().textDim, juce::Justification::centredRight);
+        styleLabel (l.lane->label, l.lane->label.getText(), 10.5f, l.accent.withAlpha (0.75f));
+    }
 
-    for (auto* b : { &saveButton, &undoButton, &redoButton, &fileButton,
-                     &timeShiftLeft, &timeShiftRight, &volShiftLeft, &volShiftRight })
+    styleLabel (volLane.label, kVolumeLabel, 10.5f, th().volumeAccent.withAlpha (0.75f));
+    styleLabel (filterLane.label, filterLabelText (filterTypeBox.getSelectedItemIndex() == 1), 10.5f,
+                th().filterAccent.withAlpha (0.75f));
+
+    filterResoSlider.setColour (juce::Slider::trackColourId, th().filterAccent.withAlpha (0.8f));
+    filterResoSlider.setColour (juce::Slider::thumbColourId, th().filterAccent);
+    filterResoSlider.setColour (juce::Slider::backgroundColourId, th().text.withAlpha (0.08f));
+    styleLabel (filterResoLabel, "RESO", 9.5f, th().textDim, juce::Justification::centredRight);
+
+    swingSlider.setColour (juce::Slider::trackColourId, th().timeAccent.withAlpha (0.8f));
+    swingSlider.setColour (juce::Slider::thumbColourId, th().timeAccent);
+    swingSlider.setColour (juce::Slider::backgroundColourId, th().text.withAlpha (0.08f));
+    styleLabel (swingLabel, "SWING", 9.5f, th().textDim, juce::Justification::centredRight);
+
+    for (auto* t : { &midiToggle, &latchToggle, &retrigToggle, &chainToggle })
+        t->setColour (juce::TextButton::buttonOnColourId, th().timeAccent);
+
+    for (auto* b : { &saveButton, &undoButton, &redoButton, &fileButton, &chainEditButton,
+                     &timeLane.shiftLeft, &timeLane.shiftRight, &volLane.shiftLeft, &volLane.shiftRight,
+                     &filterLane.shiftLeft, &filterLane.shiftRight })
     {
         b->setColour (juce::TextButton::buttonColourId,  th().panel);
         b->setColour (juce::TextButton::textColourOffId, th().text.withAlpha (0.82f));
     }
 
-    styleLabel (timeLabel, timeLabel.getText(), 10.5f,
-                th().timeAccent.withAlpha (0.75f));
-    styleLabel (volLabel,  "VOLUME   gate, sidechain, pump", 10.5f,
-                th().volumeAccent.withAlpha (0.75f));
     styleLabel (mixLabel,  "MIX", 9.5f, th().textDim, juce::Justification::centred);
     styleLabel (hintLabel, kHintText, 10.0f, th().textDim.withAlpha (0.85f));
     hintLabel.setFont (juce::FontOptions (10.0f));
@@ -581,8 +759,7 @@ void KaradagBeatEditor::importPatternFile()
 
             if (processor.importPattern (file, name))
             {
-                timeEditor  .envelopeChangedExternally();
-                volumeEditor.envelopeChangedExternally();
+                refreshAllEditors();
                 refreshGrid();
             }
             else
@@ -599,6 +776,12 @@ void KaradagBeatEditor::importPatternFile()
                                                         "OK", this);
             }
         });
+}
+
+void KaradagBeatEditor::showChainPanel()
+{
+    auto panel = std::make_unique<ChainPanel> (processor);
+    juce::CallOutBox::launchAsynchronously (std::move (panel), chainEditButton.getBounds(), this);
 }
 
 void KaradagBeatEditor::showThemeMenu()
@@ -753,37 +936,61 @@ void KaradagBeatEditor::commitSave (int slot, const juce::String& name)
 //==============================================================================
 void KaradagBeatEditor::timerCallback()
 {
-    for (int i = 0; i < KaradagBeatProcessor::waveformBins; ++i)
-        waveform[(size_t) i] = processor.getWaveformPeak (i);
+    // Dalga formu gercek zamanda tutuluyor; editor ise duz (pattern) izgarada
+    // ciziyor.  Swing varken her ekran dilimi, calindigi gercek dilimden okunur.
+    const int bins = KaradagBeatProcessor::waveformBins;
 
-    timeEditor  .setWaveform (waveform);
-    volumeEditor.setWaveform (waveform);
+    for (int i = 0; i < bins; ++i)
+    {
+        const double realPhase = processor.patternToRealPhase ((i + 0.5) / bins);
+        const int realBin = juce::jlimit (0, bins - 1, (int) (realPhase * bins));
+        waveform[(size_t) i] = processor.getWaveformPeak (realBin);
+    }
 
-    const double phase = processor.getPlayheadPhase();
-    timeEditor  .setPlayheadPhase (phase);
-    volumeEditor.setPlayheadPhase (phase);
+    for (auto* e : { &timeEditor, &volumeEditor, &filterEditor })
+    {
+        e->setWaveform (waveform);
+        e->setPlayheadPhase (processor.getPlayheadPhase());
+    }
 
-    // MIDI ile pattern degistiyse gorseli takip ettir (sese tekrar yayin yapmadan)
+    const bool highPass = filterTypeBox.getSelectedItemIndex() == 1;
+    filterEditor.setFilterHighPass (highPass);
+
+    const auto filterText = filterLabelText (highPass);
+
+    if (filterLane.label.getText() != filterText)
+        filterLane.label.setText (filterText, juce::dontSendNotification);
+
+    // MIDI ile pattern degistiyse gorseli takip ettir; nota birakilinca
+    // kullanicinin cizimi aynen geri gelir
     const int midiPreset = processor.getMidiPreset();
 
     if (midiPreset != lastSeenMidiPreset)
     {
         lastSeenMidiPreset = midiPreset;
 
-        const int index = (midiPreset >= 0) ? midiPreset : presetBox.getSelectedItemIndex();
+        if (midiPreset >= 0) processor.showSlotInEditor (midiPreset);
+        else                 processor.restoreDrawingInEditor();
 
-        if (index >= 0)
-        {
-            processor.loadSlotIntoEditor (index, false);
-            timeEditor.envelopeChangedExternally();
-            volumeEditor.envelopeChangedExternally();
-        }
+        refreshAllEditors();
 
         // Hangi slotun MIDI ile tetiklendigi gorunsun - piano roll'dan
         // calarken secili slot ile calan slot farkli olabiliyor
         midiToggle.setButtonText (midiPreset >= 0
                                     ? "MIDI " + juce::String (midiPreset + 1)
                                     : juce::String ("MIDI"));
+    }
+
+    // Zincirde calan adim
+    const int chainStep = processor.getActiveChainStep();
+
+    if (chainStep != lastSeenChainStep)
+    {
+        lastSeenChainStep = chainStep;
+        chainToggle.setButtonText (chainStep >= 0
+                                     ? "CHAIN " + juce::String (chainStep + 1) + "/"
+                                         + juce::String (processor.getChainLength())
+                                     : juce::String ("CHAIN"));
     }
 }
 
@@ -840,7 +1047,44 @@ void KaradagBeatEditor::paint (juce::Graphics& g)
     g.setColour (th().edge);
     g.drawHorizontalLine (56, 0.0f, (float) getWidth());
 
+    // alt bar
+    const int barTop = getHeight() - 20 - 36;
+    g.setColour (th().panel);
+    g.fillRect (0, barTop, getWidth(), 36);
+    g.setColour (th().edge);
+    g.drawHorizontalLine (barTop, 0.0f, (float) getWidth());
+
     drawSignature (g, { 12, 0, 152, 56 });
+}
+
+void KaradagBeatEditor::layoutLane (LaneControls& lane, EnvelopeEditor& editor,
+                                    juce::Rectangle<int> area, bool withFilterExtras)
+{
+    auto header = area.removeFromTop (20);
+    lane.toggle.setBounds (header.removeFromLeft (62).reduced (0, 2));
+
+    lane.draw.setBounds (header.removeFromRight (56).reduced (0, 2));
+    header.removeFromRight (6);
+    lane.shiftRight.setBounds (header.removeFromRight (22).reduced (0, 2));
+    header.removeFromRight (2);
+    lane.shiftLeft .setBounds (header.removeFromRight (22).reduced (0, 2));
+    header.removeFromRight (12);
+    lane.smooth     .setBounds (header.removeFromRight (100));
+    lane.smoothLabel.setBounds (header.removeFromRight (50));
+
+    if (withFilterExtras)
+    {
+        header.removeFromRight (10);
+        filterResoSlider.setBounds (header.removeFromRight (80));
+        filterResoLabel .setBounds (header.removeFromRight (38));
+        header.removeFromRight (8);
+        filterTypeBox.setBounds (header.removeFromRight (54).reduced (0, 1));
+    }
+
+    header.removeFromLeft (8);
+    lane.label.setBounds (header);
+
+    editor.setBounds (area);
 }
 
 void KaradagBeatEditor::resized()
@@ -852,7 +1096,7 @@ void KaradagBeatEditor::resized()
     top.removeFromLeft (152);   // imza alani (paint icinde ciziliyor)
 
     top.removeFromLeft (6);
-    presetBox.setBounds (top.removeFromLeft (200).withSizeKeepingCentre (200, 26));
+    presetBox.setBounds (top.removeFromLeft (220).withSizeKeepingCentre (220, 26));
 
     top.removeFromLeft (6);
     saveButton.setBounds (top.removeFromLeft (66).withSizeKeepingCentre (66, 26));
@@ -871,61 +1115,45 @@ void KaradagBeatEditor::resized()
     top.removeFromLeft (5);
     barsBox.setBounds (top.removeFromLeft (84).withSizeKeepingCentre (84, 26));
 
-    // sagdan sola: mix, midi
+    // sagdan sola: mix, tema
     auto mixArea = top.removeFromRight (62);
     mixLabel .setBounds (mixArea.removeFromBottom (10));
     mixSlider.setBounds (mixArea);
 
     top.removeFromRight (8);
-    midiToggle.setBounds (top.removeFromRight (74).withSizeKeepingCentre (74, 26));
-
-    top.removeFromRight (4);
-    latchToggle.setBounds (top.removeFromRight (62).withSizeKeepingCentre (62, 26));
-
-    top.removeFromRight (6);
-    themeButton.setBounds (top.removeFromRight (34).withSizeKeepingCentre (34, 26));
+    themeButton.setBounds (top.removeFromRight (40).withSizeKeepingCentre (40, 26));
 
     // --- alt ipucu satiri ---
-    area.removeFromBottom (2);
-    hintLabel.setBounds (area.removeFromBottom (18).reduced (12, 0));
+    hintLabel.setBounds (area.removeFromBottom (20).reduced (12, 0));
 
-    // --- iki zarf paneli ---
+    // --- alt bar: MIDI, zincir, swing ---
+    {
+        auto bar = area.removeFromBottom (36).reduced (10, 5);
+
+        midiToggle  .setBounds (bar.removeFromLeft (78));
+        bar.removeFromLeft (4);
+        latchToggle .setBounds (bar.removeFromLeft (62));
+        bar.removeFromLeft (4);
+        retrigToggle.setBounds (bar.removeFromLeft (70));
+
+        bar.removeFromLeft (20);
+        chainToggle    .setBounds (bar.removeFromLeft (96));
+        bar.removeFromLeft (3);
+        chainEditButton.setBounds (bar.removeFromLeft (30));
+
+        swingSlider.setBounds (bar.removeFromRight (150));
+        swingLabel .setBounds (bar.removeFromRight (50));
+    }
+
+    // --- uc zarf paneli: time biraz daha genis (cetvel onun ustunde) ---
     area = area.reduced (10, 8);
-    const int half = area.getHeight() / 2;
+    const int total = area.getHeight();
 
-    auto timeArea = area.removeFromTop (half);
-    {
-        auto header = timeArea.removeFromTop (20);
-        timeToggle.setBounds (header.removeFromLeft (62).reduced (0, 2));
+    auto timeArea = area.removeFromTop ((int) (total * 0.38f));
+    auto volArea  = area.removeFromTop ((int) (total * 0.32f));
+    auto filtArea = area;
 
-        timeDrawToggle.setBounds (header.removeFromRight (56).reduced (0, 2));
-        header.removeFromRight (6);
-        timeShiftRight.setBounds (header.removeFromRight (22).reduced (0, 2));
-        header.removeFromRight (2);
-        timeShiftLeft .setBounds (header.removeFromRight (22).reduced (0, 2));
-        header.removeFromRight (12);
-        timeSmoothSlider.setBounds (header.removeFromRight (100));
-        timeSmoothLabel .setBounds (header.removeFromRight (50));
-        header.removeFromLeft (8);
-        timeLabel.setBounds (header);
-        timeEditor.setBounds (timeArea.withTrimmedBottom (6));
-    }
-
-    auto volArea = area;
-    {
-        auto header = volArea.removeFromTop (20);
-        volToggle.setBounds (header.removeFromLeft (62).reduced (0, 2));
-
-        volDrawToggle.setBounds (header.removeFromRight (56).reduced (0, 2));
-        header.removeFromRight (6);
-        volShiftRight.setBounds (header.removeFromRight (22).reduced (0, 2));
-        header.removeFromRight (2);
-        volShiftLeft .setBounds (header.removeFromRight (22).reduced (0, 2));
-        header.removeFromRight (12);
-        volSmoothSlider.setBounds (header.removeFromRight (100));
-        volSmoothLabel .setBounds (header.removeFromRight (50));
-        header.removeFromLeft (8);
-        volLabel.setBounds (header);
-        volumeEditor.setBounds (volArea);
-    }
+    layoutLane (timeLane,   timeEditor,   timeArea.withTrimmedBottom (6), false);
+    layoutLane (volLane,    volumeEditor, volArea .withTrimmedBottom (6), false);
+    layoutLane (filterLane, filterEditor, filtArea,                       true);
 }
